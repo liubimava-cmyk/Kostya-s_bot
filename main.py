@@ -4,27 +4,32 @@ import sqlite3
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# ===== TOKEN из переменной окружения =====
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    raise ValueError("TOKEN не найден. Добавьте его в Environment Variables на Render")
+    raise ValueError("TOKEN не найден. Добавьте его в Environment Variables на Railway")
 
+# ===== Администратор =====
 ADMIN_USERNAME = "Lbimova"
 
+# ===== Логи =====
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
+# ===== База данных =====
 DB_FILE = "bot_data.db"
 
-# --- Тестовый режим ---
+# ===== Тестовый режим =====
 # хранит временно, какой пользователь под кем тестирует
 test_mode = {}
 
-# ---- База данных ----
+# ---- Инициализация базы ----
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # задания
     c.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +37,7 @@ def init_db():
             reward INTEGER NOT NULL
         )
     """)
+    # ожидающие подтверждения
     c.execute("""
         CREATE TABLE IF NOT EXISTS pending_tasks (
             user TEXT NOT NULL,
@@ -39,6 +45,7 @@ def init_db():
             FOREIGN KEY(task_id) REFERENCES tasks(id)
         )
     """)
+    # статистика с флагом теста
     c.execute("""
         CREATE TABLE IF NOT EXISTS stats (
             user TEXT NOT NULL,
@@ -50,6 +57,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ---- Работа с базой ----
 def get_tasks():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -106,7 +114,7 @@ def get_stats():
     conn.close()
     return rows
 
-# ---- Команды ----
+# ---- Команды бота ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я бот системы мотивации.\nНапиши /tasks чтобы увидеть задания.\n/help — правила."
@@ -136,7 +144,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "Привет! Вот список доступных заданий:\n\n*не просто любое задание, Костя — ПРОЧИТАЙ ПРАВИЛА по /help*\n\n"
+    text = "Привет! Вот список доступных заданий:\n\n*не просто любое задание, Костя — ПРОЧИТАЙ правила через /help*\n\n"
     tasks = get_tasks()
     if not tasks:
         text += "Список заданий пуст. Администратор может добавить через /addtask"
@@ -158,7 +166,6 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if task_id not in tasks_list:
         await update.message.reply_text("Такого задания нет.")
         return
-    # проверка тестового режима
     user = update.effective_user.username
     if user in test_mode:
         acting_user = test_mode[user]
@@ -182,7 +189,6 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for user, task_id in pending:
         task = [t for t in get_tasks() if t[0] == task_id][0]
         text += f"{user}: {task[1]} (+{task[2]})\n"
-        # если мама тестирует, ставим is_test=1
         is_test_flag = 1 if user == test_mode.get(username) else 0
         add_stat(user, task_id, is_test_flag)
     clear_pending()
@@ -227,7 +233,7 @@ async def test_mode_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target_user = context.args[0]
     test_mode[username] = target_user
-    await update.message.reply_text(f"Тестовый режим включен. Теперь вы действуете от имени {target_user}")
+    await update.message.reply_text(f"Тестовый режим включен. Действуете от имени {target_user}")
 
 async def test_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
@@ -242,6 +248,7 @@ def main():
     init_db()
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # Команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("tasks", tasks_command))
