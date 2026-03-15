@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS payments (
 cur.execute("""
 CREATE TABLE IF NOT EXISTS used_safety_day (
     user TEXT,
-    week_start TEXT
+    date TEXT
 )
 """)
 conn.commit()
@@ -84,7 +84,7 @@ short_rules = """
 Правила системы мотивации
 
 1. Каждый день минимум одно дело. Можно два.
-2. Пропустил день — серия сбрасывается, но 1 раз в неделю можно спасти серию.
+2. Пропустил день — серия сбрасывается, но можно 1 раз в 14 дней спасти серию.
 3. Задания:
    Уровень 1 (1,5 р.): посуда, лоток, мусор, стол, убрать часть комнаты, магазин не ночью.
    Уровень 2 (русский/английский): решить ЦТ (коэфф. 0,5) или разбор темы по русскому (35 р.)
@@ -112,7 +112,8 @@ def build_menu(username):
         buttons.append([KeyboardButton("/done"), KeyboardButton("/stats")])
     if username.lower() == ADMIN_USERNAME.lower():
         buttons.append([KeyboardButton("/approve"), KeyboardButton("/addtask"),
-                        KeyboardButton("/stats"), KeyboardButton("/pay")])
+                        KeyboardButton("/stats"), KeyboardButton("/pay"),
+                        KeyboardButton("/test"), KeyboardButton("/test_off")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def get_total_rewards(user):
@@ -130,14 +131,14 @@ def calculate_reward(task_id, points_input=None):
 
 def used_safety_day(user):
     today = datetime.today().date()
-    week_start = today - timedelta(days=today.weekday())
-    cur.execute("SELECT 1 FROM used_safety_day WHERE user=? AND week_start=?", (user, week_start.isoformat()))
+    interval_start = today - timedelta(days=13)  # 14 дней
+    cur.execute("SELECT 1 FROM used_safety_day WHERE user=? AND date BETWEEN ? AND ?", 
+                (user, interval_start.isoformat(), today.isoformat()))
     return cur.fetchone() is not None
 
 def mark_safety_day_used(user):
     today = datetime.today().date()
-    week_start = today - timedelta(days=today.weekday())
-    cur.execute("INSERT INTO used_safety_day(user, week_start) VALUES(?,?)", (user, week_start.isoformat()))
+    cur.execute("INSERT INTO used_safety_day(user, date) VALUES(?,?)", (user, today.isoformat()))
     conn.commit()
 
 # ------------------------
@@ -165,7 +166,7 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         today = datetime.today().date()
         if (today - last_date_dt).days > 1:
             if not used_safety_day(username):
-                text += "\n⚠ Пропущен день! Можно использовать страховочный день 1 раз в неделю."
+                text += "\n⚠ Пропущен день! Можно использовать страховочный день 1 раз в 14 дней."
             else:
                 text += "\n⚠ Серия прерывается, бонусы обнуляются."
     await update.message.reply_text(text, reply_markup=build_menu(username))
