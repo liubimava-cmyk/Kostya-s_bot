@@ -1,23 +1,23 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes,
     CallbackQueryHandler, ConversationHandler, MessageHandler, filters
 )
 
-# ================== НАСТРОЙКИ ==================
+# --- TOKEN из переменной окружения Railway ---
 TOKEN = os.environ.get("TOKEN")
 ADMIN_USERNAME = "Lbimova"
 KOSTYA_USERNAME = "kxstik_smerch"
 
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
-# ================== ТЕСТОВЫЙ РЕЖИМ ==================
-test_mode = False
-
-# ================== ЗАДАНИЯ ==================
+# --- ЗАДАНИЯ ---
 base_tasks = {
     1: {"category": "Группа 1", "text": "Помыть посуду", "reward": 1.5},
     2: {"category": "Группа 1", "text": "Протереть стол", "reward": 1.5},
@@ -26,236 +26,136 @@ base_tasks = {
     5: {"category": "Группа 1", "text": "Вовремя пришёл в школу", "reward": 5},
     6: {"category": "Группа 1", "text": "Лоток кота", "reward": 1.5},
     7: {"category": "Группа 1", "text": "Не ночью в магазин / прогулка", "reward": 1.5},
-    8: {"category": "Группа 2", "text": "Русский ЦТ", "reward": 0.5},
-    9: {"category": "Группа 2", "text": "Английский ЦТ", "reward": 0.5},
-    10: {"category": "Группа 3", "text": "Математика ЦТ", "reward": 15},
-    11: {"category": "Группа 3", "text": "Математика ЦТ", "reward": 15},
+    8: {"category": "Группа 2", "text": "Русский ЦТ (баллы × коэффициент)", "reward": 0.5},
+    9: {"category": "Группа 2", "text": "Английский ЦТ (баллы × коэффициент)", "reward": 0.5},
+    10: {"category": "Группа 3", "text": "Математика ЦТ до 20 баллов", "reward": 15},
+    11: {"category": "Группа 3", "text": "Математика ЦТ выше 20 баллов", "reward": 40},
 }
 
-# ================== ХРАНИЛИЩА ==================
-pending_tasks = []
-stats = {}
-user_chat_ids = {}
-photo_pending = {}
-last_test_day = {}
+# --- ХРАНЕНИЕ ДАННЫХ ---
+pending_tasks = []        # задания на проверку мамой
+offers_pending = {}       # предложения Кости до одобрения
+offered_tasks = {}        # утверждённые предложения
+stats = {}                # статистика по username
+pay_history = []          # история выплат
+approved_temp = []        # временные данные для интерактивного одобрения
+last_test_day = {}        # дата использования страховочного дня
 
-# ================== СОСТОЯНИЯ ==================
-OFFER_DESC, OFFER_PRICE = range(2)
-CONFIRM_BALANCE = 10
+# --- CONSTANTS ---
+OFFER_DESC, OFFER_PRICE, APPROVE_ASK = range(3)
 
-# ================== ПРАВИЛА ==================
+# --- HELP ---
 short_rules = """
 Правила (кратко):
 1. Каждый день минимум одно дело, можно два.
-2. Пропуск дня сбрасывает серию, но 1 раз в 14 дней можно спасти.
-3. Задания 2 и 3 — присылай скрины.
-4. Серии: 3 дня — +15 р., 7 дней — +25 р.
-5. Математика: 3 задания = +15 р. из банка.
+2. Пропуск дня сбрасывает серию, 1 раз в 14 дней можно спасти серию.
+3. Задания 1: посуда, лоток, мусор, стол, убрать часть комнаты, магазин не ночью.
+   Задания 2 и 3: присылай скрины ЦТ в личку.
+4. Задания 2/3: деньги по коэффициенту.
+5. Задания 3: ≤20 баллов — 15 р., >20 — 40 р.
+6. Серии: 3 дня — +15 р., 7 дней — +25 р.
+7. Математика: 3 задания — +15 р. в банк.
+Главное: делай хоть что-то каждый день!
 """
 
-# ================== ПОМОЩНИКИ ==================
-def get_chat_id(username: str):
-    return user_chat_ids.get(username)
-
-def save_chat_id(username: str, chat_id: int):
-    user_chat_ids[username] = chat_id
-
-def calculate_real_reward(task_id: int, points=None):
-    cat = base_tasks[task_id]["category"]
-    if cat == "Группа 2" and points: return round(points * 0.5, 1)
-    if cat == "Группа 3" and points: return 40 if points > 20 else 15
-    return base_tasks[task_id]["reward"]
-
-async def notify_mom(text: str, photo=None):
-    chat_id = get_chat_id(ADMIN_USERNAME)
-    if chat_id:
-        if photo:
-            await application.bot.send_photo(chat_id=chat_id, photo=photo, caption=text)
-        else:
-            await application.bot.send_message(chat_id=chat_id, text=text)
-
-# ================== START & HELP ==================
+# --- START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
-    save_chat_id(username, update.effective_chat.id)
-    if username == ADMIN_USERNAME:
-        await update.message.reply_text("👩‍❤️‍👩 Ты мама!\n/test — включить тестовый режим\n/tasks — задания\n/pending — проверка")
-    else:
-        await update.message.reply_text("Привет! /tasks — задания")
+    await update.message.reply_text(
+        "Привет! Я бот системы мотивации.\n"
+        "Напиши /tasks чтобы увидеть задания.\n"
+        "Напиши /help чтобы прочитать правила."
+    )
 
+# --- HELP ---
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(short_rules)
 
-# ================== ТЕСТОВЫЙ РЕЖИМ ==================
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global test_mode
-    if update.effective_user.username != ADMIN_USERNAME:
-        await update.message.reply_text("Только мама.")
-        return
-    test_mode = not test_mode
-    status = "✅ ВКЛЮЧЁН (задания идут от Кости)" if test_mode else "❌ ВЫКЛЮЧЕН"
-    await update.message.reply_text(f"Тестовый режим: {status}\nТеперь отправляй задания — всё будет приходить тебе сразу!")
-
-# ================== /TASKS — КНОПКИ (короткие, как в твоём старом) ==================
+# --- TASKS с кнопками ---
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if not username:
+        await update.message.reply_text("Нужен username Telegram для использования бота.")
+        return
     keyboard = [
-        [InlineKeyboardButton(f"{tid}. {t['text']}", callback_data=str(tid))]
+        [InlineKeyboardButton(f"{tid} — {t['text']} (+{t['reward']})", callback_data=str(tid))]
         for tid, t in base_tasks.items()
     ]
-    await update.message.reply_text("Выбери задание:", reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Выберите задание:", reply_markup=reply_markup)
 
+# --- CALLBACK для кнопок ---
 async def task_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     task_id = int(query.data)
-    await done_task_logic(task_id, context)
-    await query.edit_message_text(f"✅ Задание {task_id} отправлено.")
+    username = query.from_user.username
+    await done_task_logic(username, task_id, context, test_mode=(username==ADMIN_USERNAME))
+    await query.edit_message_text(
+        text=f"Задание {task_id} выбрано. Используй /done {task_id} для фиксации."
+    )
 
-# ================== ЛОГИКА ЗАДАНИЯ (с тестовым режимом) ==================
-async def done_task_logic(task_id: int, context: ContextTypes.DEFAULT_TYPE):
-    if task_id not in base_tasks:
-        return
-    username = KOSTYA_USERNAME if test_mode else context.effective_user.username
-    today = datetime.now().date()
-
-    pending_tasks.append({"username": username, "task_id": task_id, "date": today, "points": None})
-
-    text = f"🆕 Новое задание от @{username}:\nЗадание №{task_id}: {base_tasks[task_id]['text']}\nДата: {today}"
-    await notify_mom(text)   # ← сразу приходит тебе!
-
-    await context.bot.send_message(chat_id=context.effective_chat.id,
-                                   text=f"✅ Отправлено (тест: {test_mode})")
-
-# ================== /DONE ==================
+# --- DONE ---
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if not username:
+        await update.message.reply_text("Нужен username Telegram для использования бота.")
+        return
     if not context.args:
-        await update.message.reply_text("Используй: /done 3")
+        await update.message.reply_text("Напиши номер задания: /done 1")
         return
     task_id = int(context.args[0])
-    await done_task_logic(task_id, context)
+    test_mode = username == ADMIN_USERNAME and context.user_data.get("test_mode", False)
+    await done_task_logic(username, task_id, context, test_mode)
 
-# ================== ФОТО ==================
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if pending_tasks:
-        photo_pending[pending_tasks[-1]["username"]] = update.message.photo[-1].file_id
-        await update.message.reply_text("📸 Скрины сохранены.")
+# --- LOGIC DONE ---
+async def done_task_logic(username, task_id, context, test_mode=False):
+    if task_id not in base_tasks:
+        return await context.bot.send_message(chat_id=context._chat_id, text="Такого задания нет.")
 
-# ================== /PENDING ==================
-async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.username != ADMIN_USERNAME:
-        await update.message.reply_text("❌ Только мама.")
-        return
-    if not pending_tasks:
-        await update.message.reply_text("✅ Всё проверено.")
-        return
-    for idx, task in enumerate(pending_tasks):
-        txt = f"Задание {idx+1} от @{task['username']}\n{base_tasks[task['task_id']]['text']}"
-        keyboard = [
-            [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{idx}")],
-            [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{idx}")]
-        ]
-        await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(keyboard))
-
-# ================== ПОДТВЕРЖДЕНИЕ + СЕРИИ + БАНК ==================
-async def approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    action, idx = query.data.split("_")
-    idx = int(idx)
-    task = pending_tasks[idx]
-
-    if action == "reject":
-        await query.edit_message_text("❌ Отклонено")
-        pending_tasks.pop(idx)
-        return
-
-    if base_tasks[task["task_id"]]["category"] == "Группа 1":
-        await confirm_task(task, idx, query)
-    else:
-        context.user_data["confirm_idx"] = idx
-        await query.edit_message_text("Введи баллы:")
-        return CONFIRM_BALANCE
-
-async def confirm_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    idx = context.user_data.get("confirm_idx")
-    if idx is None: return
-    try:
-        points = float(update.message.text)
-    except:
-        await update.message.reply_text("Нужно число!")
-        return
-    await confirm_task(pending_tasks[idx], idx, update, points)
-    context.user_data.pop("confirm_idx", None)
-
-async def confirm_task(task, idx, update_obj, points=None):
-    username = task["username"]
-    task_id = task["task_id"]
-    real_reward = calculate_real_reward(task_id, points)
-
-    if username not in stats:
-        stats[username] = {"done": [], "series": 0, "last_date": None, "bank": 0, "reward_total": 0.0}
-    user = stats[username]
     today = datetime.now().date()
+    if username not in stats:
+        stats[username] = {"done": [], "series": 0, "last_date": None, "bank": 0, "reward_total": 0}
 
-    # Серия + страховочный день
-    if user["last_date"]:
-        diff = (today - user["last_date"]).days
+    user_stat = stats[username]
+
+    # --- проверка серии и страховочного дня ---
+    if user_stat["last_date"]:
+        diff = (today - user_stat["last_date"]).days
         if diff > 1:
-            user["series"] = 0
-        else:
-            user["series"] += 1
-    else:
-        user["series"] = 1
-    user["last_date"] = today
+            last_test = last_test_day.get(username)
+            if not last_test or (today - last_test).days >= 14:
+                user_stat["series"] = 0
+                last_test_day[username] = today
+                await context.bot.send_message(chat_id=context._chat_id,
+                                               text="Пропущен день. Серия сброшена, можно использовать 1 страховочный день за 14 дней.")
+            else:
+                user_stat["series"] = 0
 
-    bonus = 0
-    if user["series"] == 3: bonus += 15
-    if user["series"] == 7: bonus += 25
-    if base_tasks[task_id]["category"] == "Группа 3":
-        user["bank"] += 5
-        if user["bank"] >= 15:
-            bonus += 15
-            user["bank"] -= 15
+    # --- запись выполнения ---
+    user_stat["done"].append({"task_id": task_id, "date": today, "reward": base_tasks[task_id]["reward"], "test": test_mode})
+    user_stat["last_date"] = today
+    user_stat["reward_total"] += base_tasks[task_id]["reward"]
+    if base_tasks[task_id]["category"] == "Группа 3":  # математический банк
+        user_stat["bank"] += 5
 
-    total = real_reward + bonus
-    user["reward_total"] += total
+    # --- pending для мамы ---
+    if username == KOSTYA_USERNAME or test_mode:
+        pending_tasks.append({"username": username, "task_id": task_id, "test": test_mode})
+        if username != ADMIN_USERNAME:
+            await context.bot.send_message(chat_id=context._chat_id,
+                                           text=f"Задание {task_id} отправлено маме на проверку.")
 
-    await update_obj.bot.send_message(chat_id=get_chat_id(ADMIN_USERNAME),
-                                      text=f"✅ Задание {task_id} подтверждено! +{total} р. (серия {user['series']})")
-
-    pending_tasks.pop(idx)
-
-# ================== /STATS ==================
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.username == ADMIN_USERNAME:
-        text = "📊 Статистика:\n"
-        for u, s in stats.items():
-            text += f"@{u}: серия {s['series']} | всего {s['reward_total']:.1f} р.\n"
-    else:
-        s = stats.get(update.effective_user.username, {})
-        text = f"Серия: {s.get('series', 0)} | всего {s.get('reward_total', 0):.1f} р."
-    await update.message.reply_text(text)
-
-# ================== MAIN ==================
+# --- MAIN ---
 def main():
-    global application
-    application = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("test", test_command))
-    application.add_handler(CommandHandler("tasks", tasks_command))
-    application.add_handler(CommandHandler("done", done))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("pending", pending_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("tasks", tasks_command))
+    app.add_handler(CallbackQueryHandler(task_button))
+    app.add_handler(CommandHandler("done", done))
 
-    application.add_handler(CallbackQueryHandler(task_button, pattern=r"^\d+$"))
-    application.add_handler(CallbackQueryHandler(approve_callback, pattern=r"^(approve|reject)_\d+$"))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_balance), group=1)
-
-    application.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
