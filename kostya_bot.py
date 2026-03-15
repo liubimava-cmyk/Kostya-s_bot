@@ -1,152 +1,271 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+import os
+import sqlite3
+from telegram import Update, BotCommand
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Настройка логов
+TOKEN = os.getenv("TOKEN")
+if not TOKEN:
+    raise ValueError("TOKEN не найден. Добавьте его в Environment Variables на Render")
+
+ADMIN_USERNAME = "Lbimova"
+
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# Токен бота
-TOKEN = "8689635759:AAGEAzQV4dqzGBxoaekkX0Esv5-OpcXOq5g"
+DB_FILE = "bot_data.db"
 
-# Никнеймы
-KOSTYA = "@kxstik_smerch"
-MAMA = "@Lbimova"
+# --- Тестовый режим ---
+# хранит временно, какой пользователь под кем тестирует
+test_mode = {}
 
-# Задания
-tasks = [
-    {"group": 1, "text": "Помыть посуду", "bonus": "1.5 р."},
-    {"group": 1, "text": "Протереть стол", "bonus": "1.5 р."},
-    {"group": 1, "text": "Уборка зоны комнаты", "bonus": "1.5 р."},
-    {"group": 1, "text": "Выбросить мусор", "bonus": "1.5 р."},
-    {"group": 1, "text": "Вовремя пришёл в школу", "bonus": "5 р."},
-    {"group": 1, "text": "Лоток кота", "bonus": "1.5 р."},
-    {"group": 1, "text": "Не ночью в магазин / прогулка", "bonus": "1.5 р."},
-    {"group": 2, "text": "Русский ЦТ", "bonus": "коэф. 0.5"},
-    {"group": 2, "text": "Английский ЦТ", "bonus": "коэф. 0.5"},
-    {"group": 3, "text": "Математика ЦТ до 20 баллов", "bonus": "15 р."},
-    {"group": 3, "text": "Математика ЦТ выше 20 баллов", "bonus": "40 р."},
-]
+# ---- База данных ----
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            reward INTEGER NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS pending_tasks (
+            user TEXT NOT NULL,
+            task_id INTEGER NOT NULL,
+            FOREIGN KEY(task_id) REFERENCES tasks(id)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS stats (
+            user TEXT NOT NULL,
+            task_id INTEGER NOT NULL,
+            is_test INTEGER DEFAULT 0,
+            FOREIGN KEY(task_id) REFERENCES tasks(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-# Список результатов, ожидающих одобрения
-pending = []
+def get_tasks():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT id, text, reward FROM tasks")
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
-# Хранилище принятых заданий
-approved = []
+def add_task_to_db(text, reward):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO tasks (text, reward) VALUES (?, ?)", (text, reward))
+    conn.commit()
+    conn.close()
 
-# Команды для кнопок
-keyboard = [
-    [InlineKeyboardButton("/help", callback_data='help')],
-    [InlineKeyboardButton("/tasks", callback_data='tasks')],
-    [InlineKeyboardButton("/done", callback_data='done')],
-]
+def add_pending(user, task_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO pending_tasks (user, task_id) VALUES (?, ?)", (user, task_id))
+    conn.commit()
+    conn.close()
 
-markup = InlineKeyboardMarkup(keyboard)
+def get_pending():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT user, task_id FROM pending_tasks")
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
+def clear_pending():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM pending_tasks")
+    conn.commit()
+    conn.close()
+
+def add_stat(user, task_id, is_test=0):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO stats (user, task_id, is_test) VALUES (?, ?, ?)", (user, task_id, is_test))
+    conn.commit()
+    conn.close()
+
+def get_stats():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT user, SUM(t.reward), MAX(s.is_test)
+        FROM stats s JOIN tasks t ON s.task_id = t.id
+        GROUP BY user
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+# ---- Команды ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user.username
-    msg = ("Привет! Вот список доступных заданий:\n"
-           "*не просто любое задание, Костя - ПРОЧИТАЙ ПРАВИЛА по команде /help\n\n")
-    for idx, t in enumerate(tasks, 1):
-        msg += f"{idx}. {t['text']} ({t['bonus']})\n"
-    await update.message.reply_text(msg, reply_markup=markup)
+    await update.message.reply_text(
+        "Привет! Я бот системы мотивации.\nНапиши /tasks чтобы увидеть задания.\n/help — правила."
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        "Правила:\n"
-        "- Каждый день выбираешь любое задание из списка (1–2 максимум)\n"
-        "- Пропуск = полный сброс бонуса\n"
-        "- Бонус за 3 дня подряд: 15 р.\n"
-        "- Бонус за 7 дней подряд: 25 р.\n"
-        "- Нельзя более 2 дней подряд делать только задания 1 или 2 группы\n"
-        "- Хорошая оценка в школе (>6) = зачёт одного задания из 1 или 2 группы\n"
-        "- Плохая оценка = отработка правила по русскому, или 3 ЦТ рус., или 1 ЦТ матем.\n"
-        "- ЦТ по математике: до 20 баллов = 15 р., выше 20 баллов = 40 р.\n"
-        "- Система оценки может быть подкорректирована после реальных результатов\n"
-    )
-    await update.message.reply_text(msg)
+    text = """
+Правила системы мотивации
+1. Костя выполняет задания из списка.
+2. После выполнения — команда /done
+3. Задание отправляется маме.
+4. Мама подтверждает через /approve
+5. После подтверждения начисляется бонус
+
+Команды:
+/tasks — список заданий
+/done — отметить выполненное
+/help — правила
+
+Администратор:
+/approve — подтвердить задания
+/addtask — добавить задание
+/stats — статистика
+/test <username> — включить тест для пользователя
+/test_off — выключить тест
+"""
+    await update.message.reply_text(text)
 
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "Список заданий:\n"
-    for idx, t in enumerate(tasks, 1):
-        msg += f"{idx}. {t['text']} ({t['bonus']})\n"
-    await update.message.reply_text(msg, reply_markup=markup)
+    text = "Привет! Вот список доступных заданий:\n\n*не просто любое задание, Костя — ПРОЧИТАЙ ПРАВИЛА по /help*\n\n"
+    tasks = get_tasks()
+    if not tasks:
+        text += "Список заданий пуст. Администратор может добавить через /addtask"
+    else:
+        for t in tasks:
+            text += f"{t[0]} — {t[1]} (+{t[2]})\n"
+    await update.message.reply_text(text)
 
-async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user.username
-    if user != KOSTYA:
-        await update.message.reply_text("Спасибо за работу, но вы не Костя.")
-        return
-    if len(context.args) == 0:
-        await update.message.reply_text("Используй /done <номер задания>")
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Напиши номер задания: /done 1")
         return
     try:
-        num = int(context.args[0])
-        if num < 1 or num > len(tasks):
-            await update.message.reply_text("Неверный номер задания")
-            return
-        task = tasks[num - 1]
-        pending.append({"user": user, "task": task})
-        await update.message.reply_text(f"Задание '{task['text']}' отправлено на проверку маме.")
-    except ValueError:
-        await update.message.reply_text("Неверный номер задания")
-
-async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user.username
-    if user != MAMA:
-        await update.message.reply_text("У вас нет прав на одобрение.")
+        task_id = int(context.args[0])
+    except:
+        await update.message.reply_text("Нужно указать номер задания.")
         return
+    tasks_list = [t[0] for t in get_tasks()]
+    if task_id not in tasks_list:
+        await update.message.reply_text("Такого задания нет.")
+        return
+    # проверка тестового режима
+    user = update.effective_user.username
+    if user in test_mode:
+        acting_user = test_mode[user]
+        is_test = 1
+    else:
+        acting_user = user
+        is_test = 0
+    add_pending(acting_user, task_id)
+    await update.message.reply_text(f"Задание '{task_id}' отправлено на проверку от {acting_user} (test={is_test})")
+
+async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if username != ADMIN_USERNAME:
+        await update.message.reply_text("Команда только для администратора.")
+        return
+    pending = get_pending()
     if not pending:
-        await update.message.reply_text("Нет заданий на одобрение.")
+        await update.message.reply_text("Нет заданий на подтверждение.")
         return
-    msg = "Задания на одобрение:\n"
-    for idx, t in enumerate(pending, 1):
-        task = t['task']
-        msg += f"{idx}. {task['text']} ({task['bonus']})\n"
-    await update.message.reply_text(msg)
-    # Одобряем все
-    approved.extend(pending.copy())
-    pending.clear()
-    await update.message.reply_text("Все задания одобрены и добавлены в статистику.")
+    text = "Подтверждённые задания:\n\n"
+    for user, task_id in pending:
+        task = [t for t in get_tasks() if t[0] == task_id][0]
+        text += f"{user}: {task[1]} (+{task[2]})\n"
+        # если мама тестирует, ставим is_test=1
+        is_test_flag = 1 if user == test_mode.get(username) else 0
+        add_stat(user, task_id, is_test_flag)
+    clear_pending()
+    await update.message.reply_text(text)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == "help":
-        await help_command(update, context)
-    elif query.data == "tasks":
-        await tasks_command(update, context)
-    elif query.data == "done":
-        await query.message.reply_text("Используй команду /done <номер задания>")
-
-async def add_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user.username
-    if user != MAMA:
-        await update.message.reply_text("У вас нет прав на добавление заданий.")
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = get_stats()
+    if not rows:
+        await update.message.reply_text("Статистика пока пуста.")
         return
-    if len(context.args) < 3:
-        await update.message.reply_text("Используй /addtask <группа> <текст> <вознаграждение>")
+    text = "Статистика бонусов:\n\n"
+    for user, total, is_test in rows:
+        label = " (TEST)" if is_test else ""
+        text += f"{user}: {total} баллов{label}\n"
+    await update.message.reply_text(text)
+
+async def addtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if username != ADMIN_USERNAME:
+        await update.message.reply_text("Команда только для администратора.")
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Использование: /addtask текст_задания награда")
         return
     try:
-        group = int(context.args[0])
-        text = context.args[1]
-        bonus = context.args[2]
-        tasks.append({"group": group, "text": text, "bonus": bonus})
-        await update.message.reply_text(f"Задание '{text}' добавлено в группу {group} с бонусом {bonus}.")
-    except ValueError:
-        await update.message.reply_text("Ошибка при добавлении задания.")
+        reward = int(context.args[-1])
+        text_task = " ".join(context.args[:-1])
+    except:
+        await update.message.reply_text("Неверный формат. Пример: /addtask Убрать комнату 15")
+        return
+    add_task_to_db(text_task, reward)
+    await update.message.reply_text(f"Задание '{text_task}' (+{reward}) добавлено.")
 
+# ---- Тестовый режим ----
+async def test_mode_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if username != ADMIN_USERNAME:
+        await update.message.reply_text("Команда только для администратора.")
+        return
+    if not context.args:
+        await update.message.reply_text("Использование: /test <username>")
+        return
+    target_user = context.args[0]
+    test_mode[username] = target_user
+    await update.message.reply_text(f"Тестовый режим включен. Теперь вы действуете от имени {target_user}")
+
+async def test_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+    if username in test_mode:
+        test_mode.pop(username)
+        await update.message.reply_text("Тестовый режим выключен.")
+    else:
+        await update.message.reply_text("Тестовый режим уже выключен.")
+
+# ---- Главная функция ----
 def main():
+    init_db()
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("tasks", tasks_command))
-    app.add_handler(CommandHandler("done", done_command))
-    app.add_handler(CommandHandler("approve", approve_command))
-    app.add_handler(CommandHandler("addtask", add_task_command))
-    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(CommandHandler("done", done))
+    app.add_handler(CommandHandler("approve", approve))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("addtask", addtask))
+    app.add_handler(CommandHandler("test", test_mode_on))
+    app.add_handler(CommandHandler("test_off", test_mode_off))
+
+    # Bot Menu
+    commands = [
+        BotCommand("tasks", "Список заданий"),
+        BotCommand("help", "Правила"),
+        BotCommand("done", "Отметить выполненное"),
+        BotCommand("approve", "Подтвердить задания"),
+        BotCommand("addtask", "Добавить задание"),
+        BotCommand("stats", "Статистика"),
+        BotCommand("test", "Тестовый режим"),
+        BotCommand("test_off", "Выключить тест"),
+    ]
+    app.bot.set_my_commands(commands)
+
+    print("Бот запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
