@@ -1,254 +1,310 @@
 import logging
-import os
 import sqlite3
-from telegram import Update, BotCommand
+from datetime import datetime, timedelta
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ===== TOKEN из переменной окружения =====
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise ValueError("TOKEN не найден. Добавьте его в Environment Variables на Railway")
+import os
 
-# ===== Администратор =====
+TOKEN = os.environ.get("TOKEN")
 ADMIN_USERNAME = "Lbimova"
 
-# ===== Логи =====
+# ------------------------
+# Логирование
+# ------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# ===== База данных =====
-DB_FILE = "bot_data.db"
+# ------------------------
+# База данных
+# ------------------------
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cur = conn.cursor()
 
-# ===== Тестовый режим =====
-# хранит временно, какой пользователь под кем тестирует
-test_mode = {}
+cur.execute("""
+CREATE TABLE IF NOT EXISTS stats (
+    user TEXT,
+    task_id INTEGER,
+    date TEXT,
+    reward REAL,
+    is_test INTEGER
+)
+""")
 
-# ---- Инициализация базы ----
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # задания
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text TEXT NOT NULL,
-            reward INTEGER NOT NULL
-        )
-    """)
-    # ожидающие подтверждения
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pending_tasks (
-            user TEXT NOT NULL,
-            task_id INTEGER NOT NULL,
-            FOREIGN KEY(task_id) REFERENCES tasks(id)
-        )
-    """)
-    # статистика с флагом теста
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS stats (
-            user TEXT NOT NULL,
-            task_id INTEGER NOT NULL,
-            is_test INTEGER DEFAULT 0,
-            FOREIGN KEY(task_id) REFERENCES tasks(id)
-        )
-    """)
+cur.execute("""
+CREATE TABLE IF NOT EXISTS pending_tasks (
+    user TEXT,
+    task_id INTEGER,
+    date TEXT,
+    points_input REAL,
+    is_test INTEGER
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS payments (
+    user TEXT,
+    amount REAL,
+    date TEXT,
+    comment TEXT
+)
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS used_safety_day (
+    user TEXT,
+    week_start TEXT
+)
+""")
+
+conn.commit()
+
+# ------------------------
+# Задания
+# ------------------------
+tasks = {
+    1: {"category": 1, "text": "Помыть посуду", "reward": 1.5},
+    2: {"category": 1, "text": "Протереть стол", "reward": 1.5},
+    3: {"category": 1, "text": "Уборка зоны комнаты", "reward": 1.5},
+    4: {"category": 1, "text": "Выбросить мусор", "reward": 1.5},
+    5: {"category": 1, "text": "Вовремя пришёл в школу", "reward": 5},
+    6: {"category": 1, "text": "Лоток кота", "reward": 1.5},
+    7: {"category": 1, "text": "Не ночью в магазин / прогулка", "reward": 1.5},
+    8: {"category": 2, "text": "Русский ЦТ (баллы × коэффициент)", "reward": 0.5},
+    9: {"category": 2, "text": "Английский ЦТ (баллы × коэффициент)", "reward": 0.5},
+    10: {"category": 3, "text": "Математика ЦТ до 20 баллов", "reward": 15},
+    11: {"category": 3, "text": "Математика ЦТ выше 20 баллов", "reward": 40}
+}
+
+# ------------------------
+# Краткие правила для Кости
+# ------------------------
+short_rules = """
+Правила системы мотивации
+
+1. Каждый день минимум одно дело. Можно два.
+2. Пропустил день — серия сбрасывается, но 1 раз в неделю можно спасти серию, сделав 2 задания на следующий день.
+3. Задания:
+   Уровень 1 (простое, 1,5 р.): посуда, лоток, мусор, стол, убрать часть комнаты, магазин не ночью.
+   Уровень 2 (русский/английский): решить ЦТ (коэфф. 0,5) или разбор темы по русскому (35 руб.)
+   Уровень 3 (математика): ЦТ: ≤20 баллов — 15 р., >20 — 40 р.
+4. Нельзя более 2 дней подряд делать только лёгкие задания или только средние.
+5. Серии дают бонусы:
+   • 3 дня подряд — +15 р.
+   • 7 дней подряд — +25 р.
+6. Математика даёт накопительный бонус: за 3 выполненных задания — +15 р., можно увеличить в будущем.
+7. Хорошая оценка (>6) заменяет одно задание.
+8. Плохая оценка — нужно отработать за неделю.
+Главное: делай хоть что-то каждый день. Серия растёт шаг за шагом.
+"""
+
+# ------------------------
+# Вспомогательные функции
+# ------------------------
+def get_user_series(user):
+    cur.execute("SELECT DISTINCT date FROM stats WHERE user=? ORDER BY date ASC", (user,))
+    dates = [datetime.fromisoformat(r[0]).date() for r in cur.fetchall()]
+    series = 0
+    if not dates:
+        return series
+    today = datetime.today().date()
+    last_day = today
+    for d in reversed(dates):
+        if (last_day - d).days <= 1:
+            series += 1
+            last_day = d
+        else:
+            break
+    return series
+
+def used_safety_day(user):
+    today = datetime.today().date()
+    week_start = today - timedelta(days=today.weekday())
+    cur.execute("SELECT 1 FROM used_safety_day WHERE user=? AND week_start=?", (user, week_start.isoformat()))
+    return cur.fetchone() is not None
+
+def mark_safety_day_used(user):
+    today = datetime.today().date()
+    week_start = today - timedelta(days=today.weekday())
+    cur.execute("INSERT INTO used_safety_day(user, week_start) VALUES(?,?)", (user, week_start.isoformat()))
     conn.commit()
-    conn.close()
 
-# ---- Работа с базой ----
-def get_tasks():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT id, text, reward FROM tasks")
-    rows = c.fetchall()
-    conn.close()
-    return rows
+def calculate_reward(user, task_id, points_input=None):
+    base = tasks[task_id]["reward"]
+    if task_id in (8, 9) and points_input is not None:
+        base = base * points_input
+    return base
 
-def add_task_to_db(text, reward):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO tasks (text, reward) VALUES (?, ?)", (text, reward))
-    conn.commit()
-    conn.close()
+def get_total_rewards(user):
+    cur.execute("SELECT SUM(reward) FROM stats WHERE user=?", (user,))
+    total = cur.fetchone()[0]
+    if total is None:
+        total = 0
+    cur.execute("SELECT SUM(amount) FROM payments WHERE user=?", (user,))
+    paid = cur.fetchone()[0]
+    if paid is None:
+        paid = 0
+    return total, paid, total - paid
 
-def add_pending(user, task_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO pending_tasks (user, task_id) VALUES (?, ?)", (user, task_id))
-    conn.commit()
-    conn.close()
+# ------------------------
+# Меню команд (кнопки)
+# ------------------------
+def build_menu(username):
+    buttons = [[KeyboardButton("/tasks"), KeyboardButton("/help")]]
+    if username.lower() == "kostya":
+        buttons.append([KeyboardButton("/done"), KeyboardButton("/stats")])
+    if username.lower() == ADMIN_USERNAME.lower():
+        buttons.append([KeyboardButton("/approve"), KeyboardButton("/addtask"), KeyboardButton("/stats"), KeyboardButton("/pay")])
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-def get_pending():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT user, task_id FROM pending_tasks")
-    rows = c.fetchall()
-    conn.close()
-    return rows
+# ------------------------
+# Переменные для тестового режима
+# ------------------------
+test_mode_user = None
 
-def clear_pending():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("DELETE FROM pending_tasks")
-    conn.commit()
-    conn.close()
-
-def add_stat(user, task_id, is_test=0):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO stats (user, task_id, is_test) VALUES (?, ?, ?)", (user, task_id, is_test))
-    conn.commit()
-    conn.close()
-
-def get_stats():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("""
-        SELECT user, SUM(t.reward), MAX(s.is_test)
-        FROM stats s JOIN tasks t ON s.task_id = t.id
-        GROUP BY user
-    """)
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-# ---- Команды бота ----
+# ------------------------
+# Хэндлеры
+# ------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
     await update.message.reply_text(
-        "Привет! Я бот системы мотивации.\nНапиши /tasks чтобы увидеть задания.\n/help — правила."
+        f"Привет! Я бот системы мотивации.\n\nНапиши /tasks чтобы увидеть задания.\nНапиши /help чтобы прочитать правила.",
+        reply_markup=build_menu(username)
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """
-Правила системы мотивации
-1. Костя выполняет задания из списка.
-2. После выполнения — команда /done
-3. Задание отправляется маме.
-4. Мама подтверждает через /approve
-5. После подтверждения начисляется бонус
-
-Команды:
-/tasks — список заданий
-/done — отметить выполненное
-/help — правила
-
-Администратор:
-/approve — подтвердить задания
-/addtask — добавить задание
-/stats — статистика
-/test <username> — включить тест для пользователя
-/test_off — выключить тест
-"""
-    await update.message.reply_text(text)
+    await update.message.reply_text(short_rules)
 
 async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "Привет! Вот список доступных заданий:\n\n*не просто любое задание, Костя — ПРОЧИТАЙ правила через /help*\n\n"
-    tasks = get_tasks()
-    if not tasks:
-        text += "Список заданий пуст. Администратор может добавить через /addtask"
-    else:
-        for t in tasks:
-            text += f"{t[0]} — {t[1]} (+{t[2]})\n"
-    await update.message.reply_text(text)
+    username = update.effective_user.username
+    text = "Привет! Вот список доступных заданий:\n\n*не просто любое задание, Костя — ПРОЧИТАЙ ПРАВИЛА по команде /help*\n\n"
+    for t in tasks:
+        cat = tasks[t]["category"]
+        reward = tasks[t]["reward"]
+        text += f"{t} — {tasks[t]['text']} (ур. {cat}, +{reward})\n"
+    # Проверка пропущенного дня и страховочного дня
+    last_date = cur.execute("SELECT MAX(date) FROM stats WHERE user=?", (username,)).fetchone()[0]
+    if last_date:
+        last_date_dt = datetime.fromisoformat(last_date).date()
+        today = datetime.today().date()
+        if (today - last_date_dt).days > 1:
+            if not used_safety_day(username):
+                text += "\nВнимание! Пропущен день. Можно использовать страховочный день 1 раз в неделю."
+            else:
+                text += "\nВнимание! Серия прерывается, бонусы обнуляются."
+    await update.message.reply_text(text, reply_markup=build_menu(username))
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global test_mode_user
+    username = update.effective_user.username
+    target_user = test_mode_user if test_mode_user else username
     if not context.args:
         await update.message.reply_text("Напиши номер задания: /done 1")
         return
     try:
         task_id = int(context.args[0])
     except:
-        await update.message.reply_text("Нужно указать номер задания.")
+        await update.message.reply_text("Неверный номер задания.")
         return
-    tasks_list = [t[0] for t in get_tasks()]
-    if task_id not in tasks_list:
+    if task_id not in tasks:
         await update.message.reply_text("Такого задания нет.")
         return
-    user = update.effective_user.username
-    if user in test_mode:
-        acting_user = test_mode[user]
-        is_test = 1
-    else:
-        acting_user = user
-        is_test = 0
-    add_pending(acting_user, task_id)
-    await update.message.reply_text(f"Задание '{task_id}' отправлено на проверку от {acting_user} (test={is_test})")
+    points_input = None
+    if tasks[task_id]["category"] in (2,3):
+        # Для ЦТ просим ввести баллы после выполнения
+        if len(context.args) > 1:
+            try:
+                points_input = float(context.args[1])
+            except:
+                points_input = None
+    cur.execute("INSERT INTO pending_tasks(user, task_id, date, points_input, is_test) VALUES(?,?,?,?,?)",
+                (target_user, task_id, datetime.today().isoformat(), points_input, 1 if test_mode_user else 0))
+    conn.commit()
+    await update.message.reply_text(f"Задание '{tasks[task_id]['text']}' отправлено маме на проверку.")
 
 async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global test_mode_user
     username = update.effective_user.username
     if username != ADMIN_USERNAME:
         await update.message.reply_text("Команда только для администратора.")
         return
-    pending = get_pending()
+    pending = cur.execute("SELECT rowid, user, task_id, points_input, is_test FROM pending_tasks").fetchall()
     if not pending:
         await update.message.reply_text("Нет заданий на подтверждение.")
         return
     text = "Подтверждённые задания:\n\n"
-    for user, task_id in pending:
-        task = [t for t in get_tasks() if t[0] == task_id][0]
-        text += f"{user}: {task[1]} (+{task[2]})\n"
-        is_test_flag = 1 if user == test_mode.get(username) else 0
-        add_stat(user, task_id, is_test_flag)
-    clear_pending()
+    for rowid, user, task_id, points_input, is_test in pending:
+        reward = calculate_reward(user, task_id, points_input)
+        cur.execute("INSERT INTO stats(user, task_id, date, reward, is_test) VALUES(?,?,?,?,?)",
+                    (user, task_id, datetime.today().isoformat(), reward, is_test))
+        text += f"{user}: {tasks[task_id]['text']} (+{reward}){' (TEST)' if is_test else ''}\n"
+    cur.execute("DELETE FROM pending_tasks")
+    conn.commit()
     await update.message.reply_text(text)
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = get_stats()
-    if not rows:
-        await update.message.reply_text("Статистика пока пуста.")
-        return
-    text = "Статистика бонусов:\n\n"
-    for user, total, is_test in rows:
-        label = " (TEST)" if is_test else ""
-        text += f"{user}: {total} баллов{label}\n"
-    await update.message.reply_text(text)
+    username = update.effective_user.username
+    total, paid, left = get_total_rewards(username)
+    text = f"Статистика для {username}:\n\nВсего начислено: {total}\nВыдано: {paid}\nОстаток: {left}\n"
+    user_stats = cur.execute("SELECT task_id, date, reward, is_test FROM stats WHERE user=? ORDER BY date", (username,)).fetchall()
+    for task_id, date, reward, is_test in user_stats:
+        text += f"{date}: {tasks[task_id]['text']} (+{reward}){' (TEST)' if is_test else ''}\n"
+    await update.message.reply_text(text, reply_markup=build_menu(username))
 
 async def addtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
     if username != ADMIN_USERNAME:
         await update.message.reply_text("Команда только для администратора.")
         return
-    if len(context.args) < 2:
-        await update.message.reply_text("Использование: /addtask текст_задания награда")
-        return
-    try:
-        reward = int(context.args[-1])
-        text_task = " ".join(context.args[:-1])
-    except:
-        await update.message.reply_text("Неверный формат. Пример: /addtask Убрать комнату 15")
-        return
-    add_task_to_db(text_task, reward)
-    await update.message.reply_text(f"Задание '{text_task}' (+{reward}) добавлено.")
+    await update.message.reply_text("Добавление задания пока не реализовано.")
 
-# ---- Тестовый режим ----
-async def test_mode_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def pay(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
     if username != ADMIN_USERNAME:
         await update.message.reply_text("Команда только для администратора.")
         return
+    if len(context.args) < 2:
+        await update.message.reply_text("Использование: /pay <user> <amount>")
+        return
+    user = context.args[0]
+    try:
+        amount = float(context.args[1])
+    except:
+        await update.message.reply_text("Неверная сумма.")
+        return
+    cur.execute("INSERT INTO payments(user, amount, date, comment) VALUES(?,?,?,?)",
+                (user, amount, datetime.today().isoformat(), "Выплата"))
+    conn.commit()
+    await update.message.reply_text(f"Выплата {amount} р. для {user} учтена.")
+
+async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global test_mode_user
+    username = update.effective_user.username
+    if username != ADMIN_USERNAME:
+        await update.message.reply_text("Только администратор может включать тестовый режим.")
+        return
     if not context.args:
         await update.message.reply_text("Использование: /test <username>")
         return
-    target_user = context.args[0]
-    test_mode[username] = target_user
-    await update.message.reply_text(f"Тестовый режим включен. Действуете от имени {target_user}")
+    test_mode_user = context.args[0]
+    await update.message.reply_text(f"Тестовый режим включён для {test_mode_user}.")
 
-async def test_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def test_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global test_mode_user
     username = update.effective_user.username
-    if username in test_mode:
-        test_mode.pop(username)
-        await update.message.reply_text("Тестовый режим выключен.")
-    else:
-        await update.message.reply_text("Тестовый режим уже выключен.")
+    if username != ADMIN_USERNAME:
+        await update.message.reply_text("Только администратор может выключать тестовый режим.")
+        return
+    test_mode_user = None
+    await update.message.reply_text("Тестовый режим выключен.")
 
-# ---- Главная функция ----
+# ------------------------
+# Основной запуск
+# ------------------------
 def main():
-    init_db()
     app = ApplicationBuilder().token(TOKEN).build()
-
-    # Команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("tasks", tasks_command))
@@ -256,24 +312,6 @@ def main():
     app.add_handler(CommandHandler("approve", approve))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("addtask", addtask))
-    app.add_handler(CommandHandler("test", test_mode_on))
-    app.add_handler(CommandHandler("test_off", test_mode_off))
-
-    # Bot Menu
-    commands = [
-        BotCommand("tasks", "Список заданий"),
-        BotCommand("help", "Правила"),
-        BotCommand("done", "Отметить выполненное"),
-        BotCommand("approve", "Подтвердить задания"),
-        BotCommand("addtask", "Добавить задание"),
-        BotCommand("stats", "Статистика"),
-        BotCommand("test", "Тестовый режим"),
-        BotCommand("test_off", "Выключить тест"),
-    ]
-    app.bot.set_my_commands(commands)
-
-    print("Бот запущен...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app.add_handler(CommandHandler("pay", pay))
+    app.add_handler(CommandHandler("test", test))
+    app.add_handler(CommandHandler("test_off", test
