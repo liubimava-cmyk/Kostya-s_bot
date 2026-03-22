@@ -21,7 +21,16 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GOOGLE_SHEET_JSON = "service_account.json"
+import os
+import json
+from oauth2client.service_account import ServiceAccountCredentials
+
+scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/drive']
+
+# Загружаем JSON из переменной окружения
+creds_json = os.environ.get("GOOGLE_SHEET_JSON_STR")
+creds_dict = json.loads(creds_json)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 GOOGLE_SHEET_NAME = "Motivation_Log"
 
 ADMIN_USERNAME = "Lbimova"
