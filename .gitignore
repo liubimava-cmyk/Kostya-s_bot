@@ -1,0 +1,9 @@
+# Ignoring backups
+*.bak
+
+# Secret keys
+service_account.json
+
+# Python cache
+__pycache__/
+*.pyc
