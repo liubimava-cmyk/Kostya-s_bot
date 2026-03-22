@@ -1,6 +1,7 @@
 import os
 import datetime
 from collections import defaultdict
+import json
 
 from telegram import (
     Update,
@@ -21,27 +22,23 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-import os
-import json
-from oauth2client.service_account import ServiceAccountCredentials
-
-scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/drive']
-
-# Загружаем JSON из переменной окружения
-creds_json = os.environ.get("GOOGLE_SHEET_JSON_STR")
-creds_dict = json.loads(creds_json)
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-GOOGLE_SHEET_NAME = "Motivation_Log"
-
 ADMIN_USERNAME = "Lbimova"
 
 # ================= GOOGLE =================
+GOOGLE_SHEET_NAME = "Motivation_Log"
+
 scope = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive'
 ]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEET_JSON, scope)
+# Загружаем JSON из переменной окружения GOOGLE_SHEET_JSON_STR
+creds_json = os.environ.get("GOOGLE_SHEET_JSON_STR")
+if not creds_json:
+    raise ValueError("Переменная окружения GOOGLE_SHEET_JSON_STR не задана")
+
+creds_dict = json.loads(creds_json)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
 sheet = gc.open(GOOGLE_SHEET_NAME).sheet1
 
@@ -97,6 +94,9 @@ def add_money(username, amount, event_type, comment=""):
 
 # ================= SERIES =================
 def update_series(username):
+    if username not in users:
+        return None
+
     user = users[username]
     last = user.get("last_date")
 
@@ -107,6 +107,7 @@ def update_series(username):
         elif diff == 2 and not insurance_used[username]:
             insurance_used[username] = True
             last_day = today() + datetime.timedelta(days=14)
+            user["series"] = 1
             return f"🚨 СТРАХОВОЧНЫЙ ДЕНЬ ИСПОЛЬЗОВАН!\nДо {last_day.strftime('%d.%m')} выполняй задания каждый день!"
         else:
             user["series"] = 1
@@ -125,6 +126,10 @@ def update_series(username):
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
+
+    if not username:
+        await update.message.reply_text("Ваш username не определён")
+        return
 
     if username not in users:
         users[username] = {
@@ -152,6 +157,9 @@ async def task_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     username = query.from_user.username
+    if not username:
+        await query.edit_message_text("Ошибка: username не определён")
+        return
 
     if not can_do_more(username):
         await query.edit_message_text("Лимит 3 задания достигнут")
@@ -204,7 +212,6 @@ async def approve_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action, task_id = query.data.split("_")
     task = tasks.get(task_id)
-
     if not task:
         return
 
@@ -214,7 +221,6 @@ async def approve_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         task["status"] = STATUS_APPROVED
         add_money(username, task["reward"], "TASK_REWARD", task["title"])
 
-        # мат банк
         if task["level"] == 3:
             users[username]["bank_counter"] += 1
             if users[username]["bank_counter"] == 3:
@@ -230,12 +236,6 @@ async def approve_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         task["status"] = STATUS_REJECTED
         await query.edit_message_text(f"❌ {task['title']}")
-
-# ================= OFFER JOB =================
-async def offer_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
-    user_states[username] = "OFFER_TEXT"
-    await update.message.reply_text("Опиши задание:")
 
 # ================= ADMIN INPUT =================
 async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -257,18 +257,21 @@ async def admin_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
+    if not username:
+        return
 
     # ADMIN FLOW
     if username == ADMIN_USERNAME and "admin_action" in context.user_data:
-        target = update.message.text
+        step = context.user_data.get("step")
+        target = context.user_data.get("target") or update.message.text
 
-        if context.user_data["admin_action"] == "grade":
+        if context.user_data["admin_action"] == "grade" and step != "grade_value":
             context.user_data["target"] = target
             context.user_data["step"] = "grade_value"
             await update.message.reply_text("Введи оценку:")
             return
 
-        elif context.user_data.get("step") == "grade_value":
+        elif step == "grade_value":
             grade = int(update.message.text)
             target = context.user_data["target"]
 
