@@ -2,6 +2,7 @@ import os
 import datetime
 from collections import defaultdict
 import json
+import time
 
 from telegram import (
     Update,
@@ -32,7 +33,6 @@ scope = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-# Загружаем JSON из переменной окружения GOOGLE_SHEET_JSON_STR
 creds_json = os.environ.get("GOOGLE_SHEET_JSON_STR")
 if not creds_json:
     raise ValueError("Переменная окружения GOOGLE_SHEET_JSON_STR не задана")
@@ -40,38 +40,161 @@ if not creds_json:
 creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 gc = gspread.authorize(creds)
+
 sheet = gc.open(GOOGLE_SHEET_NAME).sheet1
 
-def log_event(username, event_type, amount=0, balance=0, comment=""):
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sheet.append_row([now, username, event_type, amount, balance, comment])
+# ================= SAFE APPEND =================
+def safe_append(ws, row):
+    for _ in range(3):
+        try:
+            ws.append_row(row)
+            return
+        except:
+            time.sleep(1)
+
+# ================= INIT SHEETS =================
+def init_sheets():
+    global tasks_ws, users_ws, ledger_ws
+
+    try:
+        tasks_ws = gc.open(GOOGLE_SHEET_NAME).worksheet("tasks")
+    except:
+        tasks_ws = gc.open(GOOGLE_SHEET_NAME).add_worksheet(title="tasks", rows="1000", cols="10")
+        tasks_ws.append_row(["id","title","description","source","reward_type","reward_value","status","executor","date"])
+
+    try:
+        users_ws = gc.open(GOOGLE_SHEET_NAME).worksheet("users")
+    except:
+        users_ws = gc.open(GOOGLE_SHEET_NAME).add_worksheet(title="users", rows="1000", cols="10")
+        users_ws.append_row(["username","series","bank_counter","last_date"])
+
+    try:
+        ledger_ws = gc.open(GOOGLE_SHEET_NAME).worksheet("ledger")
+    except:
+        ledger_ws = gc.open(GOOGLE_SHEET_NAME).add_worksheet(title="ledger", rows="1000", cols="10")
+        ledger_ws.append_row(["timestamp","username","amount","type","comment"])
+
+init_sheets()
+
+# ================= DATA LOAD =================
+def load_data():
+    global tasks, users, ledger, task_counter
+
+    tasks = {}
+    users = {}
+    ledger = []
+
+    rows = tasks_ws.get_all_records()
+    for r in rows:
+        tasks[r["id"]] = r
+
+    rows = users_ws.get_all_records()
+    for r in rows:
+        users[r["username"]] = {
+            "series": int(r["series"]),
+            "bank_counter": int(r["bank_counter"]),
+            "last_date": datetime.date.fromisoformat(r["last_date"]) if r["last_date"] else None
+        }
+
+    rows = ledger_ws.get_all_records()
+    for r in rows:
+        ledger.append(r)
+
+    if tasks:
+        task_counter = max(int(k) for k in tasks.keys()) + 1
+    else:
+        task_counter = 1
+
+load_data()
 
 # ================= DATA =================
-users = {}
-tasks = {}
-task_counter = 1
-
-offers = {"pending": [], "approved": []}
-ledger = []
+users = users
+tasks = tasks
+task_counter = task_counter
+ledger = ledger
 
 insurance_used = defaultdict(bool)
 daily_levels = defaultdict(list)
 
-# состояния диалогов
 user_states = {}
 
 # ================= CONSTANTS =================
 STATUS_AVAILABLE = "AVAILABLE"
+STATUS_OFFERED = "OFFERED"
 STATUS_SUBMITTED = "SUBMITTED"
 STATUS_APPROVED = "APPROVED"
 STATUS_REJECTED = "REJECTED"
+
+SOURCE_SYSTEM = "SYSTEM"
+SOURCE_USER = "USER"
+
+# ================= CRUD =================
+def save_task(task):
+    safe_append(tasks_ws, [
+        task["id"],
+        task.get("title",""),
+        task.get("description",""),
+        task.get("source",""),
+        task.get("reward_type",""),
+        task.get("reward_value",0),
+        task.get("status",""),
+        task.get("executor",""),
+        str(task.get("date",""))
+    ])
+
+def update_task(task_id, field, value):
+    cell = tasks_ws.find(task_id)
+    col_map = {
+        "status": 7,
+        "executor": 8
+    }
+    col = col_map[field]
+    tasks_ws.update_cell(cell.row, col, value)
+
+def save_user(username):
+    u = users[username]
+
+    safe_append(users_ws, [
+        username,
+        u["series"],
+        u["bank_counter"],
+        str(u["last_date"] or "")
+    ])
+
+def update_user(username):
+    cell = users_ws.find(username)
+    u = users[username]
+
+    users_ws.update(f"A{cell.row}:D{cell.row}", [[
+        username,
+        u["series"],
+        u["bank_counter"],
+        str(u["last_date"] or "")
+    ]])
+
+def add_money(username, amount, event_type, comment=""):
+    ledger.append({
+        "username": username,
+        "amount": amount,
+        "type": event_type
+    })
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    safe_append(ledger_ws, [
+        now,
+        username,
+        amount,
+        event_type,
+        comment
+    ])
 
 # ================= HELPERS =================
 def today():
     return datetime.date.today()
 
 def get_balance(username):
-    return sum(x["amount"] for x in ledger if x["username"] == username)
+    return sum(float(x["amount"]) for x in ledger if x["username"] == username)
 
 def approved_today(username):
     return [
@@ -83,14 +206,6 @@ def approved_today(username):
 
 def can_do_more(username):
     return len(approved_today(username)) < 3
-
-def add_money(username, amount, event_type, comment=""):
-    ledger.append({
-        "username": username,
-        "amount": amount,
-        "type": event_type
-    })
-    log_event(username, event_type, amount, get_balance(username), comment)
 
 # ================= SERIES =================
 def update_series(username):
@@ -137,6 +252,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "bank_counter": 0,
             "last_date": None
         }
+        save_user(username)
+
         await update.message.reply_text("Введи логин выполняющего задания")
         user_states[username] = "SET_NAME"
     else:
@@ -144,15 +261,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= TASKS =================
 async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Посуда (1.5)", callback_data="task_1")],
-        [InlineKeyboardButton("Мусор (1.5)", callback_data="task_2")],
-        [InlineKeyboardButton("Математика", callback_data="task_3")]
-    ]
+    keyboard = []
+
+    keyboard.extend([
+        [InlineKeyboardButton("Посуда (1.5)", callback_data="task_sys_1")],
+        [InlineKeyboardButton("Мусор (1.5)", callback_data="task_sys_2")],
+        [InlineKeyboardButton("Математика", callback_data="task_sys_3")]
+    ])
+
+    for t in tasks.values():
+        if t["status"] == STATUS_AVAILABLE:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{t['title']} ({t['reward_value']})",
+                    callback_data=f"task_user_{t['id']}"
+                )
+            ])
+
     await update.message.reply_text("Выбери задание:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def task_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global task_counter
+
     query = update.callback_query
     await query.answer()
 
@@ -165,28 +295,48 @@ async def task_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Лимит 3 задания достигнут")
         return
 
-    task_map = {
-        "task_1": ("Посуда", 1, 1.5),
-        "task_2": ("Мусор", 1, 1.5),
-        "task_3": ("Математика", 3, 40)
-    }
+    if query.data.startswith("task_sys_"):
+        task_map = {
+            "task_sys_1": ("Посуда", 1, 1.5),
+            "task_sys_2": ("Мусор", 1, 1.5),
+            "task_sys_3": ("Математика", 3, 40)
+        }
 
-    title, level, reward = task_map[query.data]
+        title, level, reward = task_map[query.data]
 
-    task_id = str(task_counter)
-    task_counter += 1
+        task_id = str(task_counter)
+        task_counter += 1
 
-    tasks[task_id] = {
-        "id": task_id,
-        "title": title,
-        "level": level,
-        "reward": reward,
-        "status": STATUS_SUBMITTED,
-        "executor": username,
-        "date": today()
-    }
+        task = {
+            "id": task_id,
+            "title": title,
+            "level": level,
+            "reward_value": reward,
+            "reward_type": "FIXED",
+            "source": SOURCE_SYSTEM,
+            "status": STATUS_SUBMITTED,
+            "executor": username,
+            "date": today()
+        }
 
-    await query.edit_message_text(f"Отправлено на проверку: {title}")
+        tasks[task_id] = task
+        save_task(task)
+
+    elif query.data.startswith("task_user_"):
+        task_id = query.data.split("_")[-1]
+        task = tasks[task_id]
+
+        task["status"] = STATUS_SUBMITTED
+        update_task(task_id, "status", STATUS_SUBMITTED)
+
+    await query.edit_message_text("Отправлено на проверку")
+
+# ================= OFFER =================
+async def offer_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = update.effective_user.username
+
+    user_states[username] = "OFFER_TITLE"
+    await update.message.reply_text("Название задания:")
 
 # ================= ADMIN =================
 async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -194,15 +344,21 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for t in tasks.values():
-        if t["status"] == STATUS_SUBMITTED:
+        if t["status"] in [STATUS_SUBMITTED, STATUS_OFFERED]:
+
+            text = f"{t['id']} - {t['title']}"
+            if t["status"] == STATUS_OFFERED:
+                text += "\n(ОФФЕР)"
+
             keyboard = [
                 [
                     InlineKeyboardButton("✅", callback_data=f"approve_{t['id']}"),
                     InlineKeyboardButton("❌", callback_data=f"reject_{t['id']}")
                 ]
             ]
+
             await update.message.reply_text(
-                f"{t['id']} - {t['title']}",
+                text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
@@ -218,23 +374,38 @@ async def approve_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = task["executor"]
 
     if action == "approve":
-        task["status"] = STATUS_APPROVED
-        add_money(username, task["reward"], "TASK_REWARD", task["title"])
 
-        if task["level"] == 3:
+        if task["status"] == STATUS_OFFERED:
+            task["status"] = STATUS_AVAILABLE
+            update_task(task_id, "status", STATUS_AVAILABLE)
+
+            await query.edit_message_text(f"✅ Оффер принят: {task['title']}")
+            return
+
+        task["status"] = STATUS_APPROVED
+        update_task(task_id, "status", STATUS_APPROVED)
+
+        reward = task.get("reward_value", 0)
+        add_money(username, reward, "TASK_REWARD", task["title"])
+
+        if task.get("reward_type") == "FIXED" and task["title"] == "Математика":
             users[username]["bank_counter"] += 1
             if users[username]["bank_counter"] == 3:
                 users[username]["bank_counter"] = 0
                 add_money(username, 15, "MATH_BANK")
 
         msg = update_series(username)
+        update_user(username)
 
         await query.edit_message_text(f"✅ {task['title']}")
+
         if msg:
             await query.message.reply_text(msg)
 
     else:
         task["status"] = STATUS_REJECTED
+        update_task(task_id, "status", STATUS_REJECTED)
+
         await query.edit_message_text(f"❌ {task['title']}")
 
 # ================= ADMIN INPUT =================
@@ -246,6 +417,7 @@ async def admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("Оценка", callback_data="grade")],
         [InlineKeyboardButton("Опоздание", callback_data="late")]
     ]
+
     await update.message.reply_text("Что вводим?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def admin_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -260,7 +432,52 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not username:
         return
 
-    # ADMIN FLOW
+    # ===== USER FSM =====
+    if username in user_states:
+        state = user_states[username]
+
+        if state == "OFFER_TITLE":
+            context.user_data["offer_title"] = update.message.text
+            user_states[username] = "OFFER_DESC"
+            await update.message.reply_text("Описание задания:")
+            return
+
+        elif state == "OFFER_DESC":
+            context.user_data["offer_desc"] = update.message.text
+            user_states[username] = "OFFER_REWARD"
+            await update.message.reply_text("Награда (число):")
+            return
+
+        elif state == "OFFER_REWARD":
+            global task_counter
+
+            reward = float(update.message.text)
+
+            task_id = str(task_counter)
+            task_counter += 1
+
+            task = {
+                "id": task_id,
+                "title": context.user_data["offer_title"],
+                "description": context.user_data["offer_desc"],
+                "source": SOURCE_USER,
+                "reward_type": "FIXED",
+                "reward_value": reward,
+                "status": STATUS_OFFERED,
+                "executor": username,
+                "date": today()
+            }
+
+            tasks[task_id] = task
+            save_task(task)
+
+            user_states.pop(username)
+            context.user_data.clear()
+
+            await update.message.reply_text("Оффер отправлен на одобрение")
+            return
+
+    # ===== ADMIN FLOW =====
     if username == ADMIN_USERNAME and "admin_action" in context.user_data:
         step = context.user_data.get("step")
         target = context.user_data.get("target") or update.message.text
@@ -301,6 +518,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("ДА", callback_data="reset_yes")],
         [InlineKeyboardButton("НЕТ", callback_data="reset_no")]
     ]
+
     await update.message.reply_text("Точно очистить всё?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -312,7 +530,6 @@ async def reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = {}
         tasks = {}
         ledger = []
-        log_event("system", "CLEANED", 0, 0, "reset")
         await query.edit_message_text("Система очищена")
     else:
         await query.edit_message_text("Отмена")
