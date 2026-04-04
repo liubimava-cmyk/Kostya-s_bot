@@ -163,6 +163,27 @@ def log_event(username, event_type, amount=0, balance=0, comment=""):
 def add_money(username, amount, event_type, comment=""):
     log_event(username, event_type, amount, get_balance(username), comment)
 
+def save_user(username):
+    """Сохраняет текущее состояние пользователя в users_ws.
+    Ищет строку по username и обновляет её, либо добавляет новую.
+    """
+    user = users[username]
+    last_date_str = user["last_date"].isoformat() if user["last_date"] else ""
+    new_row = [
+        username,
+        user.get("series", 0),
+        user.get("bank_counter", 0),
+        last_date_str,
+        user.get("role", ROLE_GUEST)
+    ]
+    try:
+        # Ищем существующую строку по username (колонка A = 1)
+        cell = users_ws.find(username)
+        users_ws.update(f"A{cell.row}:E{cell.row}", [new_row])
+    except Exception:
+        # Если не нашли — добавляем новую строку
+        safe_append(users_ws, new_row)
+
 # ================= SERIES LOGIC =================
 def update_series(username):
     user = users[username]
@@ -175,7 +196,9 @@ def update_series(username):
         elif diff == 2 and not insurance_used[username]:
             insurance_used[username] = True
             last_day = today() + datetime.timedelta(days=14)
-            user["series"] = 1
+            # Серия продолжается (страховка не сбрасывает), last_date обновляем
+            user["last_date"] = today()
+            save_user(username)
             return f"🚨 СТРАХОВОЧНЫЙ ДЕНЬ ИСПОЛЬЗОВАН!\nДо {last_day.strftime('%d.%m')} выполняй задания каждый день!"
         else:
             user["series"] = 1
@@ -189,6 +212,7 @@ def update_series(username):
     if user["series"] == 9:
         add_money(username, 25, "SERIES_BONUS")
 
+    save_user(username)  # Сохраняем серию и last_date в Google Sheets
     return None
 # ================= CONTENT =================
 LEVEL_TEXTS = {
@@ -256,11 +280,20 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     role = users.get(username, {}).get("role", ROLE_GUEST)
 
     if role == ROLE_MAMA:
-        await update.message.reply_text("Меню Мамы:", reply_markup=mama_menu_keyboard())
+        text = "Меню Мамы:"
+        markup = mama_menu_keyboard()
     elif role == ROLE_KOSTYA:
-        await update.message.reply_text("Меню Кости:", reply_markup=get_main_menu(ROLE_KOSTYA))
+        text = "Меню Кости:"
+        markup = get_main_menu(ROLE_KOSTYA)
     else:
-        await update.message.reply_text("Меню Гостя:", reply_markup=get_main_menu(ROLE_GUEST))
+        text = "Меню Гостя:"
+        markup = get_main_menu(ROLE_GUEST)
+
+    # Определяем источник вызова: callback или обычное сообщение
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.message.reply_text(text, reply_markup=markup)
 
 async def help_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -308,13 +341,39 @@ async def show_mama_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= COMPLETION LOGIC =================
 async def complete_task(username, level, idx, reward):
     task_id = f"{level}_{idx}_{str(datetime.datetime.now().timestamp())}"
+    title = LEVEL_TEXTS[level][idx-1] if level in ["1", "1+", "1++"] else LEVEL_TEXTS[level][0]
     tasks[task_id] = {
         "id": task_id,
-        "title": LEVEL_TEXTS[level][idx-1] if level in ["1","1+","1++"] else LEVEL_TEXTS[level][0],
-        "level": level, "reward": reward, "status": STATUS_COMPLETED, "executor": username, "date": str(today())
+        "title": title,
+        "description": "",
+        "source": SOURCE_SYSTEM,
+        "reward_type": "FIXED" if level in ["1", "1+", "1++", "4"] else "COEF",
+        "reward_value": reward,
+        "status": STATUS_COMPLETED,
+        "executor": username,
+        "date": str(today())
     }
-    safe_append(tasks_ws, [task_id, tasks[task_id]["title"], level, reward, STATUS_COMPLETED, username, str(today())])
+    # 9 колонок: id, title, description, source, reward_type, reward_value, status, executor, date
+    safe_append(tasks_ws, [
+        task_id,
+        title,
+        "",
+        SOURCE_SYSTEM,
+        tasks[task_id]["reward_type"],
+        reward,
+        STATUS_COMPLETED,
+        username,
+        str(today())
+    ])
     add_money(username, reward, "TASK_COMPLETE", comment=f"Level {level} Task {idx}")
+
+    # Математический банк: level 4 → bank_counter++, каждые 3 → +15 р.
+    if level == "4" and username in users:
+        users[username]["bank_counter"] = users[username].get("bank_counter", 0) + 1
+        if users[username]["bank_counter"] % 3 == 0:
+            add_money(username, 15, "MATH_BANK",
+                      comment=f"Банк математики: {users[username]['bank_counter']} выполнений")
+        save_user(username)  # Сохраняем обновлённый bank_counter
 
 # ================= TEXT & CALLBACK HANDLER =================
 async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -361,6 +420,44 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"Записано! +{rew} р.")
             user_states.pop(username)
         except: await update.message.reply_text("Ошибка в баллах!")
+    elif state == "MAMA_ADD_TITLE":
+        context.user_data["mama_task_title"] = text
+        user_states[username] = "MAMA_ADD_REWARD"
+        await update.message.reply_text("Награда за задание (рублей):")
+    elif state == "MAMA_ADD_REWARD":
+        global task_counter
+        try:
+            reward_val = float(text)
+            tid = str(task_counter)
+            tasks[tid] = {
+                "id": tid,
+                "title": context.user_data.get("mama_task_title", "Без названия"),
+                "description": "",
+                "source": SOURCE_SYSTEM,
+                "reward_type": "FIXED",
+                "reward_value": reward_val,
+                "status": STATUS_AVAILABLE,
+                "executor": "",
+                "date": str(today())
+            }
+            safe_append(tasks_ws, [
+                tid,
+                tasks[tid]["title"],
+                "",
+                SOURCE_SYSTEM,
+                "FIXED",
+                reward_val,
+                STATUS_AVAILABLE,
+                "",
+                str(today())
+            ])
+            task_counter += 1
+            user_states.pop(username)
+            await update.message.reply_text(
+                f'Задание "{tasks[tid]["title"]}" добавлено ({reward_val} р.).'
+            )
+        except ValueError:
+            await update.message.reply_text("Введите число (сумму награды):")
 
 async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -397,6 +494,65 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         elif data == "mama_pay":
             user_states[username] = "MAMA_PAY"
             await query.message.reply_text("Сумма выплаты:")
+        elif data == "mama_done": await show_done_for_mama(update, context)
+        elif data == "mama_add_task": await show_add_task_for_mama(update, context)
+        elif data == "mama_delete_task": await show_delete_task_for_mama(update, context)
+        elif data.startswith("mama_del_"):
+            tid = data.replace("mama_del_", "", 1)
+            if tid in tasks and tasks[tid].get("status") == STATUS_AVAILABLE:
+                del tasks[tid]
+                await update.callback_query.answer(f"Задание {tid} удалено")
+                await show_delete_task_for_mama(update, context)
+            else:
+                await update.callback_query.answer("Задание не найдено или уже недоступно")
+
+# ================= MAMA EXTRA HANDLERS =================
+async def show_done_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает все выполненные задания."""
+    done = [t for t in tasks.values() if t.get("status") == STATUS_COMPLETED]
+    if not done:
+        await update.callback_query.edit_message_text(
+            "Нет выполненных заданий",
+            reply_markup=mama_menu_keyboard()
+        )
+        return
+    lines = [f"{t['id']}. {t.get('title', '—')} — {t.get('executor', '—')} — {t.get('date', '—')}"
+             for t in done[-20:]]  # Последние 20, чтобы не переполнить сообщение
+    text = "Выполненные задания (последние 20):\n" + "\n".join(lines)
+    await update.callback_query.edit_message_text(
+        text[:4000],  # Telegram limit
+        reply_markup=mama_menu_keyboard()
+    )
+
+async def show_add_task_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Запускает FSM добавления задания мамой."""
+    username = update.callback_query.from_user.username
+    user_states[username] = "MAMA_ADD_TITLE"
+    await update.callback_query.message.reply_text(
+        "Введите название нового задания:"
+    )
+
+async def show_delete_task_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает доступные задания с кнопками удаления."""
+    available = [t for t in tasks.values() if t.get("status") == STATUS_AVAILABLE]
+    if not available:
+        await update.callback_query.edit_message_text(
+            "Нет доступных заданий для удаления",
+            reply_markup=mama_menu_keyboard()
+        )
+        return
+    text = "Выберите задание для удаления:\n"
+    buttons = []
+    for t in available:
+        label = f"{t['id']}. {t.get('title', '—')} — {t.get('reward_value', 0)} р."
+        text += label + "\n"
+        buttons.append([
+            InlineKeyboardButton(f"Удалить {t['id']}", callback_data=f"mama_del_{t['id']}")
+        ])
+    buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await update.callback_query.edit_message_text(
+        text, reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 # ================= APPLICATION START =================
 if __name__ == '__main__':
