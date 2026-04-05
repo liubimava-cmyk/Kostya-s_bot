@@ -377,6 +377,7 @@ async def complete_task(username, level, idx, reward):
 
 # ================= TEXT & CALLBACK HANDLER =================
 async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global task_counter
     text = update.message.text
     username = update.effective_user.username
     state = user_states.get(username)
@@ -425,7 +426,6 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_states[username] = "MAMA_ADD_REWARD"
         await update.message.reply_text("Награда за задание (рублей):")
     elif state == "MAMA_ADD_REWARD":
-        global task_counter
         try:
             reward_val = float(text)
             tid = str(task_counter)
