@@ -174,7 +174,7 @@ def load_data():
             "series": int(r["series"]) if r["series"] else 0,
             "bank_counter": int(r["bank_counter"]) if r["bank_counter"] else 0,
             "last_date": datetime.date.fromisoformat(r["last_date"]) if r["last_date"] else None,
-            "role": get_role(uname)   # всегда из правил, не из Sheets
+            "role": r.get("role", ROLE_GUEST) or ROLE_GUEST
         }
 
     # LEDGER
