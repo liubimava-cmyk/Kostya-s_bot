@@ -58,7 +58,7 @@ async def _sheets_worker():
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USERNAME = "Lbimova"
-KOSTYA_USERNAMES = ["kxstik_smerch", "babushka_ira_lub"]
+KOSTYA_USERNAMES = ["kxstik_smerch", "babushka_ira_lub", "nemovl4"]
 GOOGLE_SHEET_NAME = "Motivation_Log"
 
 # ================= CONSTANTS =================
