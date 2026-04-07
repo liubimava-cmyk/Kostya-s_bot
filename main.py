@@ -169,11 +169,12 @@ def load_data():
     time.sleep(1.2)
     rows = users_ws.get_all_records()
     for r in rows:
-        users[r["username"]] = {
+        uname = r["username"]
+        users[uname] = {
             "series": int(r["series"]) if r["series"] else 0,
             "bank_counter": int(r["bank_counter"]) if r["bank_counter"] else 0,
             "last_date": datetime.date.fromisoformat(r["last_date"]) if r["last_date"] else None,
-            "role": r.get("role", ROLE_GUEST)
+            "role": get_role(uname)   # всегда из правил, не из Sheets
         }
 
     # LEDGER
@@ -187,6 +188,15 @@ def load_data():
         task_counter = 1
 
 load_data()
+
+# ================= HELPERS =================
+def get_role(username: str) -> str:
+    """Определяет роль по username — единственный источник правды."""
+    if username == ADMIN_USERNAME:
+        return ROLE_MAMA
+    if username in KOSTYA_USERNAMES:
+        return ROLE_KOSTYA
+    return ROLE_GUEST
 
 # ================= LOGGING & MONEY =================
 def log_event(username, event_type, amount=0, balance=0, comment=""):
@@ -303,9 +313,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ваш username не определён")
         return
 
-    if username == ADMIN_USERNAME: role = ROLE_MAMA
-    elif username in KOSTYA_USERNAMES: role = ROLE_KOSTYA
-    else: role = ROLE_GUEST
+    role = get_role(username)
 
     if username not in users:
         users[username] = {"series": 0, "bank_counter": 0, "last_date": None, "role": role}
@@ -321,7 +329,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
-    role = users.get(username, {}).get("role", ROLE_GUEST)
+    # Роль из памяти, но если пользователь не загружен — определяем по username
+    role = users.get(username, {}).get("role") or get_role(username)
 
     if role == ROLE_MAMA:
         text = "Меню Мамы:"
