@@ -5,6 +5,8 @@ from collections import defaultdict
 import json
 import time
 import asyncio
+import concurrent.futures
+import threading
 
 from telegram import (
     Update,
@@ -24,6 +26,34 @@ from telegram.ext import (
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+# ================= SHEETS WRITE QUEUE =================
+# Все записи в Google Sheets идут через очередь.
+# Пользователь получает ответ немедленно; Sheets пишутся в фоне.
+_sheets_queue    = []            # pending-задачи
+_sheets_lock     = threading.Lock()
+_sheets_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=3, thread_name_prefix="sheets"
+)
+
+def enqueue(func):
+    """Добавить blocking-задачу в очередь (thread-safe, любой контекст)."""
+    with _sheets_lock:
+        _sheets_queue.append(func)
+
+async def _sheets_worker():
+    """Фоновая корутина: собирает задачи пачками за 300 мс, пишет в thread pool."""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(0.3)
+        with _sheets_lock:
+            batch = _sheets_queue.copy()
+            _sheets_queue.clear()
+        if batch:
+            await loop.run_in_executor(
+                _sheets_executor,
+                lambda b=batch: [f() for f in b]
+            )
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -161,7 +191,8 @@ load_data()
 # ================= LOGGING & MONEY =================
 def log_event(username, event_type, amount=0, balance=0, comment=""):
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    safe_append(ledger_ws, [now, username, amount, event_type, comment])
+    row = [now, username, amount, event_type, comment]
+    enqueue(lambda r=row: safe_append(ledger_ws, r))
     ledger.append({
         "username": username,
         "amount": amount,
@@ -174,9 +205,7 @@ def add_money(username, amount, event_type, comment=""):
     log_event(username, event_type, amount, get_balance(username), comment)
 
 def save_user(username):
-    """Сохраняет текущее состояние пользователя в users_ws.
-    Ищет строку по username и обновляет её, либо добавляет новую.
-    """
+    """Сохраняет пользователя в users_ws через фоновую очередь."""
     user = users[username]
     last_date_str = user["last_date"].isoformat() if user["last_date"] else ""
     new_row = [
@@ -186,13 +215,13 @@ def save_user(username):
         last_date_str,
         user.get("role", ROLE_GUEST)
     ]
-    try:
-        # Ищем существующую строку по username (колонка A = 1)
-        cell = users_ws.find(username)
-        users_ws.update(f"A{cell.row}:E{cell.row}", [new_row])
-    except Exception:
-        # Если не нашли — добавляем новую строку
-        safe_append(users_ws, new_row)
+    def _write(uname=username, row=new_row):
+        try:
+            cell = users_ws.find(uname)
+            users_ws.update(f"A{cell.row}:E{cell.row}", [row])
+        except Exception:
+            safe_append(users_ws, row)
+    enqueue(_write)
 
 # ================= SERIES LOGIC =================
 def update_series(username):
@@ -658,14 +687,37 @@ async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ================= APPLICATION START =================
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def post_init(application):
+    """Запускаем фоновый воркер Sheets-очереди после старта event loop."""
+    asyncio.create_task(_sheets_worker())
+    print("[Queue] Sheets write worker started")
 
-    # Регистрация всех хэндлеров
+if __name__ == '__main__':
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.up.railway.app
+    PORT = int(os.getenv("PORT", 8443))
+
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(global_query_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, global_text_handler))
 
-    print("Бот запущен...")
-    app.run_polling()
+    if WEBHOOK_URL:
+        # ── Webhook-режим (продакшн) ──────────────────────────────────────
+        print(f"[Webhook] port={PORT}  url={WEBHOOK_URL}")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=BOT_TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+        )
+    else:
+        # ── Polling-режим (локальная разработка) ──────────────────────────
+        print("[Polling] Бот запущен в режиме polling...")
+        app.run_polling()
 
