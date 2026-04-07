@@ -9,7 +9,9 @@ import asyncio
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    KeyboardButton
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -37,9 +39,17 @@ STATUS_APPROVED = "APPROVED"
 STATUS_REJECTED = "REJECTED"
 STATUS_COMPLETED = "COMPLETED"
 STATUS_DONE = "DONE"
+STATUS_ARCHIVED = "ARCHIVED"
 
 SOURCE_SYSTEM = "SYSTEM"
 SOURCE_USER = "USER"
+
+# Постоянная нижняя кнопка навигации (ReplyKeyboard)
+MAIN_MENU_REPLY_KB = ReplyKeyboardMarkup(
+    [[KeyboardButton("🏠 Главное меню")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
 
 ROLE_MAMA = "MAMA"
 ROLE_KOSTYA = "KOSTYA"
@@ -273,6 +283,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         safe_append(users_ws, [username, 0, 0, "", role])
 
     users[username]["role"] = role
+    # Устанавливаем постоянную нижнюю кнопку навигации
+    await update.message.reply_text(
+        "Используй кнопку ниже для быстрого возврата в меню:",
+        reply_markup=MAIN_MENU_REPLY_KB
+    )
     await show_main_menu(update, context)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -305,7 +320,12 @@ async def help_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "5. Серии: 5 дней (+10р), 9 дней (+25р).\n"
         "Серия 14 дней. Делай хоть что-то каждый день."
     )
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("В главное меню", callback_data="main_menu")]]))
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("В главное меню", callback_data="main_menu")]])
+    # Работает и из /rules-команды, и из inline-кнопки
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.message.reply_text(text, reply_markup=markup)
 # ================= MAMA SPECIFIC HANDLERS =================
 async def show_pending_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending = [t for t in tasks.values() if t["status"] in [STATUS_SUBMITTED, STATUS_OFFERED]]
@@ -315,8 +335,13 @@ async def show_pending_for_mama(update: Update, context: ContextTypes.DEFAULT_TY
     text = "Непроверенные задания:\n"
     buttons = []
     for t in pending:
-        text += f"{t['id']}. {t['title']} — {t.get('reward_value',0)}\n"
-        buttons.append([InlineKeyboardButton(f"{t['id']}", callback_data=f"mama_approve_{t['id']}")])
+        label_type = "оффер" if t["status"] == STATUS_OFFERED else "выполнено"
+        text += (f"{t['id']}. {t.get('title', '—')} "
+                 f"({label_type}) — {t.get('executor', '?')} — {t.get('reward_value', 0)} р.\n")
+        buttons.append([
+            InlineKeyboardButton(f"✓ {t['id']}", callback_data=f"mama_approve_{t['id']}"),
+            InlineKeyboardButton(f"✗ {t['id']}", callback_data=f"mama_reject_{t['id']}")
+        ])
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
     await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -381,6 +406,12 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text
     username = update.effective_user.username
     state = user_states.get(username)
+
+    # ReplyKeyboard: постоянная кнопка возврата в главное меню
+    if text == "🏠 Главное меню":
+        user_states.pop(username, None)  # сбрасываем любой FSM-стейт
+        await show_main_menu(update, context)
+        return
 
     # ЛОГИКА "Мама /номер сумма"
     if text.startswith("Мама /"):
@@ -472,7 +503,8 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data.startswith("stask_"):
         lvl = data.split("_")[1]
         kb = [[InlineKeyboardButton(t, callback_data=f"cmpl_{lvl}_{i+1}")] for i, t in enumerate(LEVEL_TEXTS[lvl])]
-        await query.edit_message_text(f"Задания {lvl}:", reply_markup=InlineKeyboardMarkup(kb))
+        kb.append([InlineKeyboardButton("← Назад к уровням", callback_data="tasks")])
+        await query.edit_message_text(f"Задания уровня {lvl}:", reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith("cmpl_"):
         _, lvl, idx = data.split("_")
         if lvl in ["2", "3", "4"]:
@@ -486,6 +518,8 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data == "offer_job":
         user_states[username] = "OFFER_TITLE"
         await query.message.reply_text("Название вашего задания:")
+    elif data == "kostya_stats":
+        await show_user_stats(update, context)
     elif data.startswith("mama_"):
         # Мама-кнопки
         if data == "mama_pending": await show_pending_for_mama(update, context)
@@ -497,11 +531,43 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         elif data == "mama_done": await show_done_for_mama(update, context)
         elif data == "mama_add_task": await show_add_task_for_mama(update, context)
         elif data == "mama_delete_task": await show_delete_task_for_mama(update, context)
+        elif data.startswith("mama_approve_"):
+            tid = data.replace("mama_approve_", "", 1)
+            if tid not in tasks:
+                await update.callback_query.answer("Задание не найдено")
+            else:
+                t = tasks[tid]
+                if t["status"] == STATUS_SUBMITTED:
+                    # Выполненное задание: одобряем → APPROVED + деньги + серия
+                    t["status"] = STATUS_APPROVED
+                    executor = t.get("executor", "")
+                    if executor and executor in users:
+                        add_money(executor, float(t.get("reward_value", 0)),
+                                  "TASK_REWARD", comment=f"Одобрено: {t.get('title', '')}")
+                        update_series(executor)
+                    await update.callback_query.answer(f"✓ Задание одобрено, +{t.get('reward_value', 0)} р.")
+                    await show_pending_for_mama(update, context)
+                elif t["status"] == STATUS_OFFERED:
+                    # Оффер от Кости: одобряем → AVAILABLE (теперь доступно для выполнения)
+                    t["status"] = STATUS_AVAILABLE
+                    await update.callback_query.answer(f"✓ Оффер одобрен — задание доступно для выполнения")
+                    await show_pending_for_mama(update, context)
+                else:
+                    await update.callback_query.answer("Задание уже обработано")
+        elif data.startswith("mama_reject_"):
+            tid = data.replace("mama_reject_", "", 1)
+            if tid not in tasks:
+                await update.callback_query.answer("Задание не найдено")
+            else:
+                tasks[tid]["status"] = STATUS_REJECTED
+                await update.callback_query.answer(f"✗ Задание {tid} отклонено")
+                await show_pending_for_mama(update, context)
         elif data.startswith("mama_del_"):
             tid = data.replace("mama_del_", "", 1)
             if tid in tasks and tasks[tid].get("status") == STATUS_AVAILABLE:
-                del tasks[tid]
-                await update.callback_query.answer(f"Задание {tid} удалено")
+                # Мягкое удаление: задание скрывается из списка, история сохраняется
+                tasks[tid]["status"] = STATUS_ARCHIVED
+                await update.callback_query.answer(f"Задание {tid} перемещено в архив")
                 await show_delete_task_for_mama(update, context)
             else:
                 await update.callback_query.answer("Задание не найдено или уже недоступно")
@@ -552,6 +618,43 @@ async def show_delete_task_for_mama(update: Update, context: ContextTypes.DEFAUL
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
     await update.callback_query.edit_message_text(
         text, reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+# ================= USER STATS =================
+async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Статистика для любой роли: серия, баланс, выплачено, банк математики."""
+    username = update.callback_query.from_user.username
+    user = users.get(username, {})
+
+    earned = sum(
+        float(e["amount"]) for e in ledger
+        if e.get("username") == username and float(e.get("amount", 0)) > 0
+    )
+    paid = sum(
+        abs(float(e["amount"])) for e in ledger
+        if e.get("username") == username
+        and str(e.get("type", "")).upper() in ("PAYMENT", "PAYOUT")
+    )
+    balance = get_balance(username)
+    series = user.get("series", 0)
+    bank = user.get("bank_counter", 0)
+
+    text = (
+        f"📊 Статистика {username}\n\n"
+        f"🔥 Серия: {series} дн.\n"
+        f"💰 Заработано: {earned:.1f} р.\n"
+        f"💸 Выплачено: {paid:.1f} р.\n"
+        f"💼 Остаток: {balance:.1f} р."
+    )
+    if bank > 0:
+        next_bonus = 3 - (bank % 3)
+        text += f"\n📐 Банк математики: {bank} (до бонуса: {next_bonus})"
+
+    await update.callback_query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("В главное меню", callback_data="main_menu")]]
+        )
     )
 
 # ================= APPLICATION START =================
