@@ -303,6 +303,7 @@ def mama_menu_keyboard():
         [InlineKeyboardButton("Удалить доступные задания", callback_data="mama_delete_task")],
         [InlineKeyboardButton("Статистика", callback_data="mama_stats")],
         [InlineKeyboardButton("Оплатить", callback_data="mama_pay")],
+        [InlineKeyboardButton("⛔ Прервать сессию", callback_data="mama_end_session")],
         [InlineKeyboardButton("В главное меню", callback_data="main_menu")]
     ])
 
@@ -660,37 +661,74 @@ async def show_delete_task_for_mama(update: Update, context: ContextTypes.DEFAUL
     )
 
 # ================= USER STATS =================
-async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Статистика для любой роли: серия, баланс, выплачено, банк математики."""
-    username = update.callback_query.from_user.username
-    user = users.get(username, {})
+def _build_stats_text(target_username: str) -> str:
+    """Строит текст расширенной статистики для пользователя."""
+    user = users.get(target_username, {})
+    series        = user.get("series", 0)
+    session_start = user.get("session_start")
+    bank          = user.get("bank_counter", 0)
+    balance       = get_balance(target_username)
+    ss_str = session_start.strftime("%d.%m.%Y") if session_start else "—"
+    ss_iso = str(session_start) if session_start else ""
 
-    earned = sum(
-        float(e["amount"]) for e in ledger
-        if e.get("username") == username and float(e.get("amount", 0)) > 0
-    )
-    paid = sum(
-        abs(float(e["amount"])) for e in ledger
-        if e.get("username") == username
+    # APPROVED задания за текущую сессию
+    session_tasks = [
+        t for t in tasks.values()
+        if t.get("status") == STATUS_APPROVED
+        and t.get("executor") == target_username
+        and (not ss_iso or str(t.get("date", "")) >= ss_iso)
+    ]
+    session_tasks.sort(key=lambda t: str(t.get("date", "")))
+
+    # Выплаты за текущую сессию
+    session_payouts = [
+        e for e in ledger
+        if e.get("username") == target_username
         and str(e.get("type", "")).upper() in ("PAYMENT", "PAYOUT")
-    )
-    balance = get_balance(username)
-    series = user.get("series", 0)
-    bank = user.get("bank_counter", 0)
+        and (not ss_iso or str(e.get("timestamp", ""))[:10] >= ss_iso)
+    ]
 
-    text = (
-        f"📊 Статистика {username}\n\n"
-        f"🔥 Серия: {series} дн.\n"
-        f"💰 Заработано: {earned:.1f} р.\n"
-        f"💸 Выплачено: {paid:.1f} р.\n"
-        f"💼 Остаток: {balance:.1f} р."
-    )
+    lines = [f"📊 Статистика @{target_username}"]
+    lines.append(f"🗓 Начало сессии: {ss_str}")
+    lines.append(f"🔥 Серия: {series} дн. (завершено дней)")
+
+    # Список заданий
+    lines.append("\n📋 Выполненные задания (одобренные):")
+    if session_tasks:
+        total_tasks_sum = 0.0
+        for t in session_tasks:
+            r = float(t.get("reward_value", 0))
+            total_tasks_sum += r
+            lines.append(f"  • {t.get('date', '')} — {t.get('title', '—')} — +{r:.1f} р.")
+        lines.append(f"  ▶ Итого: {len(session_tasks)} заданий, {total_tasks_sum:.1f} р.")
+    else:
+        lines.append("  Нет одобренных заданий в этой сессии")
+
+    # Список выплат
+    lines.append("\n💸 Выплаты:")
+    if session_payouts:
+        total_paid = 0.0
+        for e in session_payouts:
+            amt = abs(float(e.get("amount", 0)))
+            total_paid += amt
+            ts = str(e.get("timestamp", ""))[:10]
+            lines.append(f"  • {ts} — {amt:.1f} р.")
+        lines.append(f"  ▶ Итого: {len(session_payouts)} выплат, {total_paid:.1f} р.")
+    else:
+        lines.append("  Нет выплат в этой сессии")
+
+    lines.append(f"\n💼 Остаток: {balance:.1f} р.")
     if bank > 0:
-        next_bonus = 3 - (bank % 3)
-        text += f"\n📐 Банк математики: {bank} (до бонуса: {next_bonus})"
+        lines.append(f"📐 Банк математики: {bank} (до бонуса: {3 - bank % 3})")
 
+    return "\n".join(lines)
+
+async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Расширенная статистика: сессия, задания, выплаты, баланс, банк."""
+    username = update.callback_query.from_user.username
+    text = _build_stats_text(username)
     await update.callback_query.edit_message_text(
-        text,
+        text[:4096],
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("В главное меню", callback_data="main_menu")]]
         )
