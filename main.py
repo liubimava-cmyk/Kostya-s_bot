@@ -76,7 +76,7 @@ SOURCE_USER = "USER"
 
 # Постоянная нижняя кнопка навигации (ReplyKeyboard)
 MAIN_MENU_REPLY_KB = ReplyKeyboardMarkup(
-    [[KeyboardButton("🏠 Главное меню")]],
+    [[KeyboardButton("🏠 Главное меню"), KeyboardButton("Re/start")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -451,6 +451,9 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🏠 Главное меню":
         user_states.pop(username, None)  # сбрасываем любой FSM-стейт
         await show_main_menu(update, context)
+        return
+    elif text == "Re/start":
+        await start(update, context)
         return
 
     # ЛОГИКА "Мама /номер сумма"
