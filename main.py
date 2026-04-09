@@ -11,7 +11,7 @@ import threading
 from telegram import (
     Update,
     InlineKeyboardButton,
-    BotCommand
+    BotCommand,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton
