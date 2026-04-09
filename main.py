@@ -11,6 +11,7 @@ import threading
 from telegram import (
     Update,
     InlineKeyboardButton,
+    BotCommand
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton
@@ -741,6 +742,9 @@ async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(application):
     """Запускаем фоновый воркер Sheets-очереди после старта event loop."""
     asyncio.create_task(_sheets_worker())
+    await application.bot.set_my_commands([
+        BotCommand("start", "Запустить / сменить роль"),
+    ])
     print("[Queue] Sheets write worker started")
 
 if __name__ == '__main__':
