@@ -82,9 +82,9 @@ MAIN_MENU_REPLY_KB = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-ROLE_MAMA = "MAMA"
+ROLE_ADMIN = "ADMIN"
+ROLE_MAMA = ROLE_ADMIN  # обратная совместимость
 ROLE_KOSTYA = "KOSTYA"
-ROLE_GUEST = "GUEST"
 
 LEVEL_COEFS = {
     "2": 0.5,
@@ -171,11 +171,13 @@ def load_data():
     rows = users_ws.get_all_records()
     for r in rows:
         uname = r["username"]
+        ss = r.get("session_start", "")
         users[uname] = {
             "series": int(r["series"]) if r["series"] else 0,
             "bank_counter": int(r["bank_counter"]) if r["bank_counter"] else 0,
             "last_date": datetime.date.fromisoformat(r["last_date"]) if r["last_date"] else None,
-            "role": r.get("role", ROLE_GUEST) or ROLE_GUEST
+            "role": r.get("role", ROLE_KOSTYA) or ROLE_KOSTYA,
+            "session_start": datetime.date.fromisoformat(ss) if ss else None,
         }
 
     # LEDGER
@@ -194,10 +196,10 @@ load_data()
 def get_role(username: str) -> str:
     """Определяет роль по username — единственный источник правды."""
     if username == ADMIN_USERNAME:
-        return ROLE_MAMA
+        return ROLE_ADMIN
     if username in KOSTYA_USERNAMES:
         return ROLE_KOSTYA
-    return ROLE_GUEST
+    return ROLE_KOSTYA
 
 # ================= LOGGING & MONEY =================
 def log_event(username, event_type, amount=0, balance=0, comment=""):
@@ -224,7 +226,7 @@ def save_user(username):
         user.get("series", 0),
         user.get("bank_counter", 0),
         last_date_str,
-        user.get("role", ROLE_GUEST)
+        user.get("role", ROLE_KOSTYA)
     ]
     def _write(uname=username, row=new_row):
         try:
@@ -286,7 +288,7 @@ def get_main_menu(role):
         keyboard.append([InlineKeyboardButton("Предложить задание", callback_data="offer_job")])
         keyboard.append([InlineKeyboardButton("Статистика", callback_data="kostya_stats")])
 
-    if role == ROLE_MAMA:
+    if role == ROLE_ADMIN:
         keyboard.append([InlineKeyboardButton("Непроверенные", callback_data="mama_pending")])
         keyboard.append([InlineKeyboardButton("Предложенные работы", callback_data="mama_offers")])
         keyboard.append([InlineKeyboardButton("Статистика", callback_data="mama_stats")])
@@ -299,6 +301,7 @@ def mama_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Непроверенные", callback_data="mama_pending")],
         [InlineKeyboardButton("Предложенные работы", callback_data="mama_offers")],
+        [InlineKeyboardButton("Справка", callback_data="help")],
         [InlineKeyboardButton("Выполненные задания", callback_data="mama_done")],
         [InlineKeyboardButton("Добавить задание", callback_data="mama_add_task")],
         [InlineKeyboardButton("Удалить доступные задания", callback_data="mama_delete_task")],
@@ -334,15 +337,15 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Роль из памяти, но если пользователь не загружен — определяем по username
     role = users.get(username, {}).get("role") or get_role(username)
 
-    if role == ROLE_MAMA:
-        text = "Меню Мамы:"
+    if role == ROLE_ADMIN:
+        text = "Меню Администратора:"
         markup = mama_menu_keyboard()
     elif role == ROLE_KOSTYA:
-        text = "Меню Кости:"
+        text = "Меню Выполняющего:"
         markup = get_main_menu(ROLE_KOSTYA)
     else:
-        text = "Меню Гостя:"
-        markup = get_main_menu(ROLE_GUEST)
+        text = "Меню Выполняющего:"
+        markup = get_main_menu(ROLE_KOSTYA)
 
     # Определяем источник вызова: callback или обычное сообщение
     if update.callback_query:
@@ -369,21 +372,65 @@ async def help_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=markup)
 # ================= MAMA SPECIFIC HANDLERS =================
 async def show_pending_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pending = [t for t in tasks.values() if t["status"] in [STATUS_SUBMITTED, STATUS_OFFERED]]
+    """Экран 1: список юзеров с непроверенными заданиями."""
+    pending = [t for t in tasks.values() if t.get("status") in [STATUS_SUBMITTED, STATUS_OFFERED]]
     if not pending:
-        await update.callback_query.edit_message_text("Нет непроверенных заданий", reply_markup=mama_menu_keyboard())
+        await update.callback_query.edit_message_text("Нет непроверенных заданий.", reply_markup=mama_menu_keyboard())
         return
-    text = "Непроверенные задания:\n"
-    buttons = []
-    for t in pending:
-        label_type = "оффер" if t["status"] == STATUS_OFFERED else "выполнено"
-        text += (f"{t['id']}. {t.get('title', '—')} "
-                 f"({label_type}) — {t.get('executor', '?')} — {t.get('reward_value', 0)} р.\n")
-        buttons.append([
-            InlineKeyboardButton(f"✓ {t['id']}", callback_data=f"mama_approve_{t['id']}"),
-            InlineKeyboardButton(f"✗ {t['id']}", callback_data=f"mama_reject_{t['id']}")
-        ])
+    # Собираем уникальных исполнителей
+    executors = sorted({t.get("executor", "?") for t in pending if t.get("executor")})
+    text = "Выберите пользователя для проверки:\n"
+    for e in executors:
+        cnt = sum(1 for t in pending if t.get("executor") == e)
+        text += f"  @{e}: {cnt} заданий\n"
+    buttons = [[InlineKeyboardButton(f"@{e}", callback_data=f"mama_pend_u_{e}")] for e in executors]
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+async def show_pending_tasks_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
+    """Экран 2: нумерованный список заданий юзера → кнопки по номеру."""
+    user_tasks = [
+        t for t in tasks.values()
+        if t.get("executor") == target
+        and t.get("status") in [STATUS_SUBMITTED, STATUS_OFFERED]
+    ]
+    if not user_tasks:
+        await update.callback_query.edit_message_text(
+            f"У @{target} нет непроверенных заданий.", reply_markup=mama_menu_keyboard()
+        )
+        return
+    text = f"@{target} — непроверенные задания:\n\n"
+    buttons = []
+    for n, t in enumerate(user_tasks, 1):
+        rw = float(t.get("reward_value", 0))
+        text += f"{n}. {t.get('date', '')} / {t.get('title', '—')} — {rw:.1f} р.\n"
+        buttons.append([InlineKeyboardButton(
+            str(n), callback_data=f"mama_task_act_{t['id']}"
+        )])
+    buttons.append([InlineKeyboardButton("← Назад", callback_data="mama_pending")])
+    buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+async def show_task_action(update: Update, context: ContextTypes.DEFAULT_TYPE, tid: str):
+    """Экран 3: подтверждение — принять/отклонить конкретное задание."""
+    if tid not in tasks:
+        await update.callback_query.answer("Задание не найдено")
+        return
+    t = tasks[tid]
+    rw = float(t.get("reward_value", 0))
+    text = (
+        f"Задание: {t.get('title', '—')}\n"
+        f"Исполнитель: @{t.get('executor', '?')}\n"
+        f"Дата: {t.get('date', '')}\n"
+        f"Стоимость: {rw:.1f} р.\n\n"
+        f"Принять или отклонить?"
+    )
+    buttons = [
+        [InlineKeyboardButton("✅ Принять", callback_data=f"mama_approve_{tid}"),
+         InlineKeyboardButton("❌ Отклонить", callback_data=f"mama_reject_{tid}")],
+        [InlineKeyboardButton("← Назад", callback_data=f"mama_pend_u_{t.get('executor', '')}"),
+         InlineKeyboardButton("В главное меню", callback_data="main_menu")]
+    ]
     await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 async def show_offers_for_mama(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -400,9 +447,21 @@ async def show_offers_for_mama(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
 async def show_mama_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now()
-    total_earned = sum(float(l["amount"]) for l in ledger if datetime.datetime.strptime(l["timestamp"], "%Y-%m-%d %H:%M:%S") >= now - timedelta(days=14))
-    await update.callback_query.edit_message_text(f"Статистика за 14 дней:\nВсего начислено: {total_earned} р.", reply_markup=mama_menu_keyboard())
+    """Экран 1: список всех зарегистрированных пользователей для просмотра статистики."""
+    if not users:
+        await update.callback_query.edit_message_text("Нет зарегистрированных пользователей.", reply_markup=mama_menu_keyboard())
+        return
+    # Показываем всех, кроме самого администратора
+    admin = update.callback_query.from_user.username
+    targets = [u for u in users if u != admin]
+    if not targets:
+        await update.callback_query.edit_message_text("Нет других пользователей.", reply_markup=mama_menu_keyboard())
+        return
+    buttons = [[InlineKeyboardButton(f"@{u}", callback_data=f"mama_stats_u_{u}")] for u in sorted(targets)]
+    buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await update.callback_query.edit_message_text(
+        "Выберите пользователя:", reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 # ================= COMPLETION LOGIC =================
 async def complete_task(username, level, idx, reward):
@@ -565,7 +624,7 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data == "kostya_stats":
         await show_user_stats(update, context)
     elif data.startswith("mama_"):
-        # Мама-кнопки
+        # Кнопки Администратора
         if data == "mama_pending": await show_pending_for_mama(update, context)
         elif data == "mama_offers": await show_offers_for_mama(update, context)
         elif data == "mama_stats": await show_mama_stats(update, context)
@@ -573,6 +632,25 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             user_states[username] = "MAMA_PAY"
             await query.message.reply_text("Сумма выплаты:")
         elif data == "mama_done": await show_done_for_mama(update, context)
+        elif data == "mama_end_session":              # #5 Прервать сессию
+            user_states[username] = "MAMA_END_SESSION_USERNAME"
+            await query.edit_message_text("Введи @никнейм пользователя, чью сессию нужно завершить:")
+        elif data.startswith("mama_pend_u_"):         # #2 Выбрали юзера в Непроверенных
+            target = data.replace("mama_pend_u_", "", 1)
+            await show_pending_tasks_for_user(update, context, target)
+        elif data.startswith("mama_task_act_"):       # #2 Нажали номер задания
+            tid = data.replace("mama_task_act_", "", 1)
+            await show_task_action(update, context, tid)
+        elif data.startswith("mama_stats_u_"):        # #3 Выбрали юзера в Статистике
+            target = data.replace("mama_stats_u_", "", 1)
+            text = _build_stats_text(target)
+            await update.callback_query.edit_message_text(
+                text[:4096],
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("← Назад", callback_data="mama_stats")],
+                    [InlineKeyboardButton("В главное меню", callback_data="main_menu")]
+                ])
+            )
         elif data == "mama_add_task": await show_add_task_for_mama(update, context)
         elif data == "mama_delete_task": await show_delete_task_for_mama(update, context)
         elif data.startswith("mama_approve_"):
