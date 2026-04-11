@@ -1,10 +1,3 @@
-# Что нового, версия 4.1:
-# - start(): отправка INTRO_TEXT перед 'Выбери роль:' (обе ветки: message и callback_query)
-# - show_role_projects(): при пустом списке у ADMIN — текст 'Нет доступных проектов как у Администратора.' + кнопка 'Создать проект'
-#   при пустом списке у USER — прежнее поведение без кнопки создания
-# - project_selection_keyboard(): защитная кнопка 'Создать проект' при project_list=[] и role==ROLE_ADMIN
-# - approve_doing(): project_id для log_event и бизнес-логики берётся из doing['project'], не из контекста admin-а
-
 import os
 import json
 import time
@@ -1023,9 +1016,6 @@ def project_selection_keyboard(project_list, role):
                 callback_data=f"project_pick_{role}_{project['id']}",
             )
         ])
-    # Защитная кнопка: если проектов нет и роль — Администратор
-    if not project_list and role == ROLE_ADMIN:
-        buttons.append([InlineKeyboardButton("Создать проект", callback_data="admin_new_project")])
     buttons.append([InlineKeyboardButton("← К выбору роли", callback_data="restart_role")])
     return InlineKeyboardMarkup(buttons)
 
@@ -1117,10 +1107,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_restart_screen(update)
     user_states[username] = STATE_ROLE_SELECT
     if update.callback_query:
-        await update.callback_query.message.reply_text(INTRO_TEXT)
         await update.callback_query.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
     else:
-        await update.message.reply_text(INTRO_TEXT)
         await update.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
 
 
@@ -1130,22 +1118,7 @@ async def show_role_projects(update: Update, context: ContextTypes.DEFAULT_TYPE,
     set_ctx(context, "selected_role", role)
 
     if not candidates:
-        if role == ROLE_ADMIN:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Создать проект", callback_data="admin_new_project")],
-                [InlineKeyboardButton("← К выбору роли", callback_data="restart_role")],
-            ])
-            await send_or_edit(
-                update,
-                "Нет доступных проектов как у Администратора.",
-                reply_markup=keyboard,
-            )
-        else:
-            await send_or_edit(
-                update,
-                "Нет доступных проектов для этой роли.",
-                reply_markup=back_main_keyboard(),
-            )
+        await send_or_edit(update, "Нет доступных проектов для этой роли.", reply_markup=back_main_keyboard())
         return
 
     set_ctx(context, "project_candidates", [item["id"] for item in candidates])
@@ -1322,24 +1295,14 @@ async def show_admin_doing_action(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def approve_doing(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
-    admin_project_id = get_current_project_id(context)
+    project_id = get_current_project_id(context)
     admin_username = normalize_username(update.effective_user.username)
-    # Ищем doing по контексту admin-а; если не нашли — ищем по всем проектам
-    key = doing_key(admin_project_id, doing_id)
+    key = doing_key(project_id, doing_id)
     doing = doings.get(key)
-    if not doing:
-        # Fallback: найти doing по doing_id среди всех проектов
-        for k, d in doings.items():
-            if d.get("id") == doing_id:
-                doing = d
-                key = k
-                break
     if not doing or doing.get("status") != DOING_STATUS_SUBMITTED:
         await update.callback_query.answer("Это выполнение уже обработано или не найдено")
         return
 
-    # Используем project_id из самого doing, чтобы не зависеть от контекста admin-а
-    project_id = doing.get("project", admin_project_id)
     username = doing.get("executor")
     doing["status"] = DOING_STATUS_APPROVED
     doing["status_date"] = str(today())
