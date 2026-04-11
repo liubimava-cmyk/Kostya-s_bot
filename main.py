@@ -58,9 +58,6 @@ async def _sheets_worker():
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GOOGLE_SHEET_NAME = "Motivation_Log"
-ADMIN_PASSWORD = "314159262"
-ADMIN_ALLOWED_USERNAMES = ["Lbimova"]
-
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8443))
 
@@ -72,9 +69,13 @@ STATUS_OFFERED = "OFFERED"
 STATUS_ARCHIVED = "ARCHIVED"
 STATUS_REJECTED = "REJECTED"
 
-STATUS_SUBMITTED = "SUBMITTED"
-STATUS_APPROVED = "APPROVED"
-STATUS_CANCELLED = "CANCELLED"
+DOING_STATUS_SUBMITTED = "SUBMITTED"
+DOING_STATUS_APPROVED = "APPROVED"
+DOING_STATUS_REJECTED = "REJECTED"
+
+SERIES_STATUS_ACTIVE = "ACTIVE"
+SERIES_STATUS_AT_RISK = "AT_RISK"
+SERIES_STATUS_CLOSED = "CLOSED"
 
 SOURCE_SYSTEM = "SYSTEM"
 SOURCE_USER = "USER"
@@ -87,120 +88,26 @@ EVENT_PAYMENT = "PAYMENT"
 EVENT_SERIES_BONUS = "SERIES_BONUS"
 EVENT_MATH_BANK = "MATH_BANK"
 EVENT_SESSION_RESET = "SESSION_RESET"
+EVENT_SERIES_BONUS_REVERT = "SERIES_BONUS_REVERT"
 
 STATE_ROLE_SELECT = "ROLE_SELECT"
-STATE_ADMIN_PASSWORD = "ADMIN_PASSWORD"
+STATE_PROJECT_SELECT = "PROJECT_SELECT"
+STATE_PROJECT_PASSWORD = "PROJECT_PASSWORD"
 STATE_OFFER_TITLE = "OFFER_TITLE"
 STATE_OFFER_REWARD = "OFFER_REWARD"
 STATE_INPUT_SCORE = "INPUT_SCORE"
 STATE_ADMIN_ADD_TITLE = "ADMIN_ADD_TITLE"
 STATE_ADMIN_ADD_REWARD = "ADMIN_ADD_REWARD"
-STATE_ADMIN_PAY_USERNAME = "ADMIN_PAY_USERNAME"
 STATE_ADMIN_PAY_AMOUNT = "ADMIN_PAY_AMOUNT"
-STATE_ADMIN_END_SESSION_USERNAME = "ADMIN_END_SESSION_USERNAME"
-STATE_ADMIN_END_SESSION_CONFIRM = "ADMIN_END_SESSION_CONFIRM"
-
-SYSTEM_TASK_SEED = [
-    {
-        "level": "1",
-        "title": "Посуда",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1",
-        "title": "Лоток",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1",
-        "title": "Мусор",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1",
-        "title": "Стол",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1",
-        "title": "Убрать часть комнаты",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1",
-        "title": "Магазин не ночью",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 1.5,
-    },
-    {
-        "level": "1+",
-        "title": "Не опоздать в школу",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 2.5,
-    },
-    {
-        "level": "1++",
-        "title": "Разбор темы по русскому",
-        "description": "",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 30.0,
-    },
-    {
-        "level": "2",
-        "title": "Русский",
-        "description": "Введите баллы ЦТ",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_COEF,
-        "reward_value": 0.5,
-    },
-    {
-        "level": "3",
-        "title": "Английский",
-        "description": "Введите баллы ЦТ",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_COEF,
-        "reward_value": 0.4,
-    },
-    {
-        "level": "4",
-        "title": "Математика",
-        "description": "Введите баллы ЦТ",
-        "source": SOURCE_SYSTEM,
-        "reward_type": REWARD_FIXED,
-        "reward_value": 0.0,
-    },
-]
-
-MAIN_MENU_REPLY_KB = ReplyKeyboardMarkup(
-    [[KeyboardButton("🏠 Главное меню"), KeyboardButton("Re/start")]],
-    resize_keyboard=True,
-    is_persistent=True,
-)
-
-SHEETS_SCOPE = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
-]
+STATE_ADMIN_END_SERIES_CONFIRM = "ADMIN_END_SERIES_CONFIRM"
+STATE_PROJECT_CREATE_NAME = "PROJECT_CREATE_NAME"
+STATE_PROJECT_CREATE_ADMINS = "PROJECT_CREATE_ADMINS"
+STATE_PROJECT_CREATE_USERS = "PROJECT_CREATE_USERS"
+STATE_PROJECT_CREATE_PASS = "PROJECT_CREATE_PASS"
+STATE_PROJECT_EDIT_PASSWORD = "PROJECT_EDIT_PASSWORD"
+STATE_PROJECT_EDIT_NAME = "PROJECT_EDIT_NAME"
+STATE_PROJECT_EDIT_ADMINS = "PROJECT_EDIT_ADMINS"
+STATE_PROJECT_EDIT_USERS = "PROJECT_EDIT_USERS"
 
 USERS_HEADERS = [
     "username",
@@ -210,7 +117,17 @@ USERS_HEADERS = [
     "role",
     "session_start",
 ]
+PROJECTS_HEADERS = [
+    "id",
+    "name",
+    "pass",
+    "author",
+    "admin",
+    "user",
+    "date_create",
+]
 TASKS_HEADERS = [
+    "project",
     "id",
     "level",
     "title",
@@ -223,6 +140,7 @@ TASKS_HEADERS = [
     "date",
 ]
 DOINGS_HEADERS = [
+    "project",
     "id",
     "task",
     "title",
@@ -230,11 +148,26 @@ DOINGS_HEADERS = [
     "source",
     "reward_type",
     "reward_value",
-    "status",
     "executor",
-    "date",
+    "date_create",
+    "admin",
+    "status",
+    "status_date",
+]
+SERIES_HEADERS = [
+    "project",
+    "username",
+    "start_date",
+    "end_date",
+    "status",
+    "broken",
+    "milestone_5_paid",
+    "milestone_9_paid",
+    "closed_by",
+    "date_closed",
 ]
 LEDGER_HEADERS = [
+    "project",
     "timestamp",
     "username",
     "amount",
@@ -242,8 +175,43 @@ LEDGER_HEADERS = [
     "comment",
 ]
 
+SHEETS_SCOPE = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive",
+]
 
-# ================= GOOGLE INIT =================
+SYSTEM_TASK_SEED = [
+    {"level": "1", "title": "Посуда", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1", "title": "Лоток", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1", "title": "Мусор", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1", "title": "Стол", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1", "title": "Убрать часть комнаты", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1", "title": "Магазин не ночью", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 1.5},
+    {"level": "1+", "title": "Не опоздать в школу", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 2.5},
+    {"level": "1++", "title": "Разбор темы по русскому", "description": "", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 30.0},
+    {"level": "2", "title": "Русский", "description": "Введите баллы ЦТ", "source": SOURCE_SYSTEM, "reward_type": REWARD_COEF, "reward_value": 0.5},
+    {"level": "3", "title": "Английский", "description": "Введите баллы ЦТ", "source": SOURCE_SYSTEM, "reward_type": REWARD_COEF, "reward_value": 0.4},
+    {"level": "4", "title": "Математика", "description": "Введите баллы ЦТ", "source": SOURCE_SYSTEM, "reward_type": REWARD_FIXED, "reward_value": 0.0},
+]
+
+HELP_TEXT = (
+    "Каждый день выполняй минимум одно дело.\n"
+    "Можешь предлагать задания.\n"
+    "Пропуск дня сбрасывает серию.\n"
+    "Задания: Ур.1 (1,5р), Ур.1+ (2,5р), Ур.1++ (30р), Ур.2 (коэф.0,5), Ур.3 (коэф.0,4), Ур.4 (15/40р).\n"
+    "Майлстоуны: 5 дней (+10р), 9 дней (+25р).\n"
+    "Полная серия - 14 дней. Делай хоть что-то каждый день - иначе ВСЮ серию начинаем сначала (накопленные деньги теряешь).\n"
+    "Без форс-мажоров выплата в конце серии (частичные выплаты - по договоренности)"
+)
+
+MAIN_MENU_REPLY_KB = ReplyKeyboardMarkup(
+    [[KeyboardButton("🏠 Главное меню"), KeyboardButton("Re/start")]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
+
+# ================= GOOGLE SHEETS INIT =================
 creds_json = os.environ.get("GOOGLE_SHEET_JSON_STR")
 if not creds_json:
     raise ValueError("Переменная окружения GOOGLE_SHEET_JSON_STR не задана")
@@ -273,21 +241,23 @@ def get_or_create_worksheet(spreadsheet, title, headers):
     header_row = ws.row_values(1)
     if header_row != headers:
         raise ValueError(
-            f"Лист '{title}' имеет неверные заголовки. Ожидается: {headers}. "
-            f"Сейчас: {header_row}"
+            f"Лист '{title}' имеет неверные заголовки. Ожидается: {headers}. Сейчас: {header_row}"
         )
     return ws
 
 
 def init_sheets():
-    global users_ws, tasks_ws, doings_ws, ledger_ws
-
+    global users_ws, projects_ws, tasks_ws, doings_ws, series_ws, ledger_ws
     spreadsheet = gc.open(GOOGLE_SHEET_NAME)
     users_ws = get_or_create_worksheet(spreadsheet, "users", USERS_HEADERS)
+    time.sleep(1.2)
+    projects_ws = get_or_create_worksheet(spreadsheet, "projects", PROJECTS_HEADERS)
     time.sleep(1.2)
     tasks_ws = get_or_create_worksheet(spreadsheet, "tasks", TASKS_HEADERS)
     time.sleep(1.2)
     doings_ws = get_or_create_worksheet(spreadsheet, "doings", DOINGS_HEADERS)
+    time.sleep(1.2)
+    series_ws = get_or_create_worksheet(spreadsheet, "series", SERIES_HEADERS)
     time.sleep(1.2)
     ledger_ws = get_or_create_worksheet(spreadsheet, "ledger", LEDGER_HEADERS)
 
@@ -295,18 +265,19 @@ def init_sheets():
 init_sheets()
 
 
-# ================= DATA CONTAINERS =================
+# ================= IN-MEMORY STORAGE =================
 users = {}
+projects = {}
 tasks = {}
 doings = {}
+series_records = []
 ledger = []
-task_counter = 1
-doing_counter = 1
-insurance_used = defaultdict(bool)
+project_task_counters = defaultdict(int)
+project_doing_counters = defaultdict(int)
 user_states = {}
 
 
-# ================= UTIL HELPERS =================
+# ================= UTIL =================
 def today():
     return datetime.date.today()
 
@@ -333,51 +304,129 @@ def parse_float_safe(value, default=0.0):
         return default
 
 
+def parse_bool(value):
+    return str(value).strip().upper() == "TRUE"
+
+
+def bool_to_sheet(value):
+    return "TRUE" if value else "FALSE"
+
+
 def normalize_username(value):
     if not value:
         return ""
-    normalized = value.strip()
-    if normalized.startswith("@"):
-        normalized = normalized[1:]
-    return normalized
+    value = value.strip()
+    if value.startswith("@"):
+        value = value[1:]
+    return value
 
 
-def is_admin_allowed(username):
-    return username in ADMIN_ALLOWED_USERNAMES
+def split_users(raw):
+    if not raw:
+        return []
+    parts = [normalize_username(item.strip()) for item in str(raw).split("|")]
+    return [item for item in parts if item]
 
 
-def clear_state(username, context):
+def join_users(items):
+    normalized = [normalize_username(item) for item in items if normalize_username(item)]
+    return "|".join(normalized)
+
+
+def get_ctx(context, key, default=None):
+    return context.user_data.get(key, default)
+
+
+def set_ctx(context, key, value):
+    context.user_data[key] = value
+
+
+def clear_temp_flow(username, context):
     user_states.pop(username, None)
-    context.user_data.pop("selected_task_id", None)
-    context.user_data.pop("offer_title", None)
-    context.user_data.pop("admin_task_title", None)
-    context.user_data.pop("payment_target", None)
-    context.user_data.pop("end_session_target", None)
+    for key in [
+        "selected_task_id",
+        "offer_title",
+        "admin_task_title",
+        "payment_project",
+        "payment_target",
+        "project_candidates",
+        "selected_project_id",
+        "selected_role",
+        "project_create_name",
+        "project_create_admins",
+        "project_create_users",
+        "project_edit_action",
+        "project_edit_target_id",
+        "pending_risk_doing_id",
+    ]:
+        context.user_data.pop(key, None)
 
 
-def get_balance(username):
+def set_current_role_project(context, role, project_id):
+    context.user_data["current_role"] = role
+    context.user_data["current_project_id"] = project_id
+
+
+def get_current_project_id(context):
+    return context.user_data.get("current_project_id")
+
+
+def get_current_role(context):
+    return context.user_data.get("current_role")
+
+
+def get_project_name(project_id):
+    project = projects.get(project_id)
+    return project.get("name", project_id) if project else project_id
+
+
+def get_balance(username, project_id=None):
     total = 0.0
     for event in ledger:
-        if event.get("username") == username:
-            total += parse_float_safe(event.get("amount", 0))
+        if event.get("username") != username:
+            continue
+        if project_id and event.get("project") != project_id:
+            continue
+        total += parse_float_safe(event.get("amount", 0))
     return total
 
 
-def next_task_id():
-    global task_counter
-    value = str(task_counter)
-    task_counter += 1
-    return value
+def next_task_id(project_id):
+    project_task_counters[project_id] += 1
+    return str(project_task_counters[project_id])
 
 
-def next_doing_id():
-    global doing_counter
-    value = str(doing_counter)
-    doing_counter += 1
-    return value
+def next_doing_id(project_id):
+    project_doing_counters[project_id] += 1
+    return str(project_doing_counters[project_id])
 
 
-# ================= LOAD / SAVE =================
+def get_project_admins(project_id):
+    project = projects.get(project_id, {})
+    return split_users(project.get("admin", ""))
+
+
+def get_project_users(project_id):
+    project = projects.get(project_id, {})
+    return split_users(project.get("user", ""))
+
+
+def user_has_project_role(username, project_id, role):
+    username = normalize_username(username)
+    if role == ROLE_ADMIN:
+        return username in get_project_admins(project_id)
+    return username in get_project_users(project_id)
+
+
+def get_accessible_projects(username, role):
+    result = []
+    for project_id, project in projects.items():
+        if user_has_project_role(username, project_id, role):
+            result.append(project)
+    result.sort(key=lambda item: (item.get("name", ""), item.get("id", "")))
+    return result
+
+
 def ensure_user(username):
     if username not in users:
         users[username] = {
@@ -391,6 +440,7 @@ def ensure_user(username):
     return users[username]
 
 
+# ================= SAVE HELPERS =================
 def save_user(username):
     user = users[username]
     row = [
@@ -412,10 +462,41 @@ def save_user(username):
     enqueue(_write)
 
 
-def save_task(task_id):
-    task = tasks[task_id]
+def save_project(project_id):
+    project = projects[project_id]
     row = [
-        task["id"],
+        project["id"],
+        project.get("name", ""),
+        project.get("pass", ""),
+        project.get("author", ""),
+        project.get("admin", ""),
+        project.get("user", ""),
+        project.get("date_create", ""),
+    ]
+
+    def _write(pid=project_id, data=row):
+        try:
+            cell = projects_ws.find(str(pid))
+            projects_ws.update(f"A{cell.row}:G{cell.row}", [data])
+        except Exception:
+            safe_append(projects_ws, data)
+
+    enqueue(_write)
+
+
+def task_key(project_id, task_id):
+    return f"{project_id}:{task_id}"
+
+
+def doing_key(project_id, doing_id):
+    return f"{project_id}:{doing_id}"
+
+
+def save_task(key):
+    task = tasks[key]
+    row = [
+        task.get("project", ""),
+        task.get("id", ""),
         task.get("level", ""),
         task.get("title", ""),
         task.get("description", ""),
@@ -427,43 +508,100 @@ def save_task(task_id):
         task.get("date", ""),
     ]
 
-    def _write(tid=task_id, data=row):
-        try:
-            cell = tasks_ws.find(str(tid))
-            tasks_ws.update(f"A{cell.row}:J{cell.row}", [data])
-        except Exception:
+    def _write(data=row):
+        all_rows = tasks_ws.get_all_records()
+        target_row = None
+        for index, item in enumerate(all_rows, start=2):
+            if str(item.get("project", "")) == str(task.get("project", "")) and str(item.get("id", "")) == str(task.get("id", "")):
+                target_row = index
+                break
+        if target_row:
+            tasks_ws.update(f"A{target_row}:K{target_row}", [data])
+        else:
             safe_append(tasks_ws, data)
 
     enqueue(_write)
 
 
-def save_doing(doing_id):
-    doing = doings[doing_id]
+def save_doing(key):
+    doing = doings[key]
     row = [
-        doing["id"],
+        doing.get("project", ""),
+        doing.get("id", ""),
         doing.get("task", ""),
         doing.get("title", ""),
         doing.get("description", ""),
         doing.get("source", ""),
         doing.get("reward_type", ""),
         doing.get("reward_value", 0),
-        doing.get("status", ""),
         doing.get("executor", ""),
-        doing.get("date", ""),
+        doing.get("date_create", ""),
+        doing.get("admin", ""),
+        doing.get("status", ""),
+        doing.get("status_date", ""),
     ]
 
-    def _write(did=doing_id, data=row):
-        try:
-            cell = doings_ws.find(str(did))
-            doings_ws.update(f"A{cell.row}:J{cell.row}", [data])
-        except Exception:
+    def _write(data=row):
+        all_rows = doings_ws.get_all_records()
+        target_row = None
+        for index, item in enumerate(all_rows, start=2):
+            if str(item.get("project", "")) == str(doing.get("project", "")) and str(item.get("id", "")) == str(doing.get("id", "")):
+                target_row = index
+                break
+        if target_row:
+            doings_ws.update(f"A{target_row}:M{target_row}", [data])
+        else:
             safe_append(doings_ws, data)
 
     enqueue(_write)
 
 
-def log_event(username, event_type, amount=0.0, comment=""):
-    row = [now_str(), username, amount, event_type, comment]
+def series_identity(record):
+    return (
+        record.get("project", ""),
+        record.get("username", ""),
+        record.get("start_date", ""),
+    )
+
+
+def save_series(record):
+    row = [
+        record.get("project", ""),
+        record.get("username", ""),
+        record.get("start_date", ""),
+        record.get("end_date", ""),
+        record.get("status", ""),
+        bool_to_sheet(record.get("broken", False)),
+        bool_to_sheet(record.get("milestone_5_paid", False)),
+        bool_to_sheet(record.get("milestone_9_paid", False)),
+        record.get("closed_by", ""),
+        record.get("date_closed", ""),
+    ]
+
+    identity = series_identity(record)
+
+    def _write(data=row, ident=identity):
+        all_rows = series_ws.get_all_records()
+        target_row = None
+        for index, item in enumerate(all_rows, start=2):
+            row_ident = (
+                str(item.get("project", "")),
+                str(item.get("username", "")),
+                str(item.get("start_date", "")),
+            )
+            if row_ident == ident:
+                target_row = index
+                break
+        if target_row:
+            series_ws.update(f"A{target_row}:J{target_row}", [data])
+        else:
+            safe_append(series_ws, data)
+
+    enqueue(_write)
+
+
+def log_event(project_id, username, event_type, amount=0.0, comment=""):
+    row = [project_id, now_str(), username, amount, event_type, comment]
 
     def _write(data=row):
         safe_append(ledger_ws, data)
@@ -471,7 +609,8 @@ def log_event(username, event_type, amount=0.0, comment=""):
     enqueue(_write)
     ledger.append(
         {
-            "timestamp": row[0],
+            "project": project_id,
+            "timestamp": row[1],
             "username": username,
             "amount": amount,
             "event_type": event_type,
@@ -480,12 +619,11 @@ def log_event(username, event_type, amount=0.0, comment=""):
     )
 
 
+# ================= LOAD DATA =================
 def load_data():
-    global task_counter, doing_counter
-
     time.sleep(1.2)
     for row in users_ws.get_all_records():
-        username = row.get("username")
+        username = normalize_username(row.get("username", ""))
         if not username:
             continue
         users[username] = {
@@ -497,11 +635,29 @@ def load_data():
         }
 
     time.sleep(1.2)
-    for row in tasks_ws.get_all_records():
-        task_id = str(row.get("id", "")).strip()
-        if not task_id:
+    for row in projects_ws.get_all_records():
+        project_id = str(row.get("id", "")).strip()
+        if not project_id:
             continue
-        tasks[task_id] = {
+        projects[project_id] = {
+            "id": project_id,
+            "name": row.get("name", ""),
+            "pass": str(row.get("pass", "")),
+            "author": normalize_username(row.get("author", "")),
+            "admin": join_users(split_users(row.get("admin", ""))),
+            "user": join_users(split_users(row.get("user", ""))),
+            "date_create": str(row.get("date_create", "")),
+        }
+
+    time.sleep(1.2)
+    for row in tasks_ws.get_all_records():
+        project_id = str(row.get("project", "")).strip()
+        task_id = str(row.get("id", "")).strip()
+        if not project_id or not task_id:
+            continue
+        key = task_key(project_id, task_id)
+        tasks[key] = {
+            "project": project_id,
             "id": task_id,
             "level": str(row.get("level", "")).strip(),
             "title": row.get("title", ""),
@@ -510,16 +666,21 @@ def load_data():
             "reward_type": row.get("reward_type", ""),
             "reward_value": parse_float_safe(row.get("reward_value", 0)),
             "status": row.get("status", ""),
-            "author": row.get("author", ""),
+            "author": normalize_username(row.get("author", "")),
             "date": str(row.get("date", "")),
         }
+        if task_id.isdigit():
+            project_task_counters[project_id] = max(project_task_counters[project_id], int(task_id))
 
     time.sleep(1.2)
     for row in doings_ws.get_all_records():
+        project_id = str(row.get("project", "")).strip()
         doing_id = str(row.get("id", "")).strip()
-        if not doing_id:
+        if not project_id or not doing_id:
             continue
-        doings[doing_id] = {
+        key = doing_key(project_id, doing_id)
+        doings[key] = {
+            "project": project_id,
             "id": doing_id,
             "task": str(row.get("task", "")),
             "title": row.get("title", ""),
@@ -527,55 +688,71 @@ def load_data():
             "source": row.get("source", ""),
             "reward_type": row.get("reward_type", ""),
             "reward_value": parse_float_safe(row.get("reward_value", 0)),
+            "executor": normalize_username(row.get("executor", "")),
+            "date_create": str(row.get("date_create", "")),
+            "admin": normalize_username(row.get("admin", "")),
             "status": row.get("status", ""),
-            "executor": row.get("executor", ""),
-            "date": str(row.get("date", "")),
+            "status_date": str(row.get("status_date", "")),
         }
+        if doing_id.isdigit():
+            project_doing_counters[project_id] = max(project_doing_counters[project_id], int(doing_id))
 
     time.sleep(1.2)
-    rows = ledger_ws.get_all_records()
-    ledger.extend(rows)
+    for row in series_ws.get_all_records():
+        project_id = str(row.get("project", "")).strip()
+        username = normalize_username(row.get("username", ""))
+        if not project_id or not username:
+            continue
+        series_records.append(
+            {
+                "project": project_id,
+                "username": username,
+                "start_date": str(row.get("start_date", "")),
+                "end_date": str(row.get("end_date", "")),
+                "status": row.get("status", ""),
+                "broken": parse_bool(row.get("broken", "FALSE")),
+                "milestone_5_paid": parse_bool(row.get("milestone_5_paid", "FALSE")),
+                "milestone_9_paid": parse_bool(row.get("milestone_9_paid", "FALSE")),
+                "closed_by": normalize_username(row.get("closed_by", "")),
+                "date_closed": str(row.get("date_closed", "")),
+            }
+        )
 
-    task_ids = [int(task_id) for task_id in tasks if str(task_id).isdigit()]
-    doing_ids = [int(doing_id) for doing_id in doings if str(doing_id).isdigit()]
-    task_counter = (max(task_ids) + 1) if task_ids else 1
-    doing_counter = (max(doing_ids) + 1) if doing_ids else 1
+    time.sleep(1.2)
+    ledger.extend(ledger_ws.get_all_records())
 
 
 load_data()
 
 
-# ================= BUSINESS HELPERS =================
+# ================= BUSINESS LOGIC =================
 def ensure_system_tasks_initialized():
-    if tasks:
+    if not projects:
         return
-
-    for item in SYSTEM_TASK_SEED:
-        task_id = next_task_id()
-        tasks[task_id] = {
-            "id": task_id,
-            "level": item["level"],
-            "title": item["title"],
-            "description": item["description"],
-            "source": item["source"],
-            "reward_type": item["reward_type"],
-            "reward_value": item["reward_value"],
-            "status": STATUS_AVAILABLE,
-            "author": "SYSTEM",
-            "date": str(today()),
-        }
-        save_task(task_id)
+    for project_id, project in projects.items():
+        has_tasks = any(task.get("project") == project_id for task in tasks.values())
+        if has_tasks:
+            continue
+        for item in SYSTEM_TASK_SEED:
+            task_id = next_task_id(project_id)
+            key = task_key(project_id, task_id)
+            tasks[key] = {
+                "project": project_id,
+                "id": task_id,
+                "level": item["level"],
+                "title": item["title"],
+                "description": item["description"],
+                "source": item["source"],
+                "reward_type": item["reward_type"],
+                "reward_value": item["reward_value"],
+                "status": STATUS_AVAILABLE,
+                "author": project.get("author", "SYSTEM"),
+                "date": str(today()),
+            }
+            save_task(key)
 
 
 ensure_system_tasks_initialized()
-
-
-def set_user_role(username, role):
-    ensure_user(username)
-    users[username]["role"] = role
-    if not users[username].get("session_start"):
-        users[username]["session_start"] = today()
-    save_user(username)
 
 
 def calculate_reward(task, score=None):
@@ -596,14 +773,17 @@ def calculate_reward(task, score=None):
     return reward_value
 
 
-def create_doing_from_task(task_id, executor, score=None):
-    if task_id not in tasks:
+def create_doing_from_task(project_id, task_id, executor, score=None):
+    key = task_key(project_id, task_id)
+    if key not in tasks:
         raise ValueError("Задание не найдено")
 
-    task = tasks[task_id]
+    task = tasks[key]
     reward = calculate_reward(task, score=score)
-    doing_id = next_doing_id()
-    doings[doing_id] = {
+    doing_id = next_doing_id(project_id)
+    d_key = doing_key(project_id, doing_id)
+    doings[d_key] = {
+        "project": project_id,
         "id": doing_id,
         "task": task_id,
         "title": task.get("title", ""),
@@ -611,149 +791,204 @@ def create_doing_from_task(task_id, executor, score=None):
         "source": task.get("source", ""),
         "reward_type": task.get("reward_type", ""),
         "reward_value": reward,
-        "status": STATUS_SUBMITTED,
         "executor": executor,
-        "date": str(today()),
+        "date_create": str(today()),
+        "admin": "",
+        "status": DOING_STATUS_SUBMITTED,
+        "status_date": str(today()),
     }
-    save_doing(doing_id)
-    return doings[doing_id]
+    save_doing(d_key)
+    return doings[d_key]
 
 
-def update_series_on_approved_doing(username):
-    user = ensure_user(username)
-    last = user.get("last_date")
-    insurance_message = None
-
-    if last:
-        diff = (today() - last).days
-        if diff == 1:
-            user["series"] += 1
-        elif diff == 2 and not insurance_used[username]:
-            insurance_used[username] = True
-            user["last_date"] = today()
-            save_user(username)
-            insurance_message = (
-                "🚨 СТРАХОВОЧНЫЙ ДЕНЬ ИСПОЛЬЗОВАН!\n"
-                "Серия сохранена, дальше выполняй задания ежедневно."
-            )
-            return insurance_message
-        else:
-            user["series"] = 1
-    else:
-        user["series"] = 1
-
-    user["last_date"] = today()
-
-    if user["series"] == 5:
-        log_event(username, EVENT_SERIES_BONUS, 10, "Бонус за 5 дней серии")
-    if user["series"] == 9:
-        log_event(username, EVENT_SERIES_BONUS, 25, "Бонус за 9 дней серии")
-
-    save_user(username)
-    return insurance_message
+def get_active_series(project_id, username):
+    active = []
+    for item in series_records:
+        if item.get("project") == project_id and item.get("username") == username and item.get("status") in {SERIES_STATUS_ACTIVE, SERIES_STATUS_AT_RISK}:
+            active.append(item)
+    if not active:
+        return None
+    active.sort(key=lambda x: x.get("start_date", ""), reverse=True)
+    return active[0]
 
 
-def apply_math_bank_if_needed(username, doing):
+def create_series_if_needed(project_id, username):
+    current = get_active_series(project_id, username)
+    if current:
+        return current
+    new_record = {
+        "project": project_id,
+        "username": username,
+        "start_date": str(today()),
+        "end_date": "",
+        "status": SERIES_STATUS_ACTIVE,
+        "broken": False,
+        "milestone_5_paid": False,
+        "milestone_9_paid": False,
+        "closed_by": "",
+        "date_closed": "",
+    }
+    series_records.append(new_record)
+    save_series(new_record)
+    return new_record
+
+
+def update_series_after_approval(project_id, username):
+    record = create_series_if_needed(project_id, username)
+    start_date = parse_date_safe(record.get("start_date")) or today()
+    current_day = (today() - start_date).days + 1
+
+    if current_day >= 5 and not record.get("milestone_5_paid"):
+        record["milestone_5_paid"] = True
+        log_event(project_id, username, EVENT_SERIES_BONUS, 10, "Майлстоун серии: 5 дней")
+
+    if current_day >= 9 and not record.get("milestone_9_paid"):
+        record["milestone_9_paid"] = True
+        log_event(project_id, username, EVENT_SERIES_BONUS, 25, "Майлстоун серии: 9 дней")
+
+    save_series(record)
+    return record
+
+
+def detect_series_risk(project_id, username):
+    record = get_active_series(project_id, username)
+    if not record:
+        return None
+    if record.get("status") == SERIES_STATUS_AT_RISK:
+        return record
+
+    start_date = parse_date_safe(record.get("start_date"))
+    if not start_date:
+        return None
+
+    approved_dates = []
+    for doing in doings.values():
+        if doing.get("project") != project_id:
+            continue
+        if doing.get("executor") != username:
+            continue
+        if doing.get("status") != DOING_STATUS_APPROVED:
+            continue
+        approved_date = parse_date_safe(doing.get("status_date") or doing.get("date_create"))
+        if approved_date:
+            approved_dates.append(approved_date)
+
+    if not approved_dates:
+        return None
+
+    last_approved_date = max(approved_dates)
+    if (today() - last_approved_date).days > 1:
+        record["status"] = SERIES_STATUS_AT_RISK
+        record["broken"] = True
+        save_series(record)
+        return record
+    return None
+
+
+def close_series(project_id, username, closed_by):
+    record = get_active_series(project_id, username)
+    if not record:
+        return False, "Активной серии нет."
+
+    if record.get("milestone_5_paid"):
+        log_event(project_id, username, EVENT_SERIES_BONUS_REVERT, -10, "Отмена майлстоуна 5 дней при закрытии серии")
+    if record.get("milestone_9_paid"):
+        log_event(project_id, username, EVENT_SERIES_BONUS_REVERT, -25, "Отмена майлстоуна 9 дней при закрытии серии")
+
+    record["status"] = SERIES_STATUS_CLOSED
+    record["end_date"] = str(today())
+    record["closed_by"] = closed_by
+    record["date_closed"] = str(today())
+    save_series(record)
+    return True, "Серия закрыта."
+
+
+def apply_math_bank_if_needed(project_id, username, doing):
     task_id = str(doing.get("task", ""))
-    task = tasks.get(task_id)
-    if not task:
-        return
-
-    if task.get("level") != "4":
+    key = task_key(project_id, task_id)
+    task = tasks.get(key)
+    if not task or task.get("level") != "4":
         return
 
     user = ensure_user(username)
     user["bank_counter"] = user.get("bank_counter", 0) + 1
     if user["bank_counter"] % 3 == 0:
-        log_event(
-            username,
-            EVENT_MATH_BANK,
-            15,
-            f"Банк математики: {user['bank_counter']} выполнений уровня 4",
-        )
+        log_event(project_id, username, EVENT_MATH_BANK, 15, f"Банк математики: {user['bank_counter']} выполнений уровня 4")
     save_user(username)
 
 
-def build_stats_text(target_username):
-    user = users.get(target_username, {})
-    session_start = user.get("session_start")
-    session_start_str = session_start.strftime("%d.%m.%Y") if session_start else "—"
-    series = user.get("series", 0)
-    bank_counter = user.get("bank_counter", 0)
-    balance = get_balance(target_username)
-
-    approved_doings = []
-    for doing in doings.values():
-        if doing.get("executor") != target_username:
-            continue
-        if doing.get("status") != STATUS_APPROVED:
-            continue
-        doing_date = parse_date_safe(doing.get("date"))
-        if session_start and doing_date and doing_date < session_start:
-            continue
-        approved_doings.append(doing)
-
-    approved_doings.sort(key=lambda item: item.get("date", ""))
-
-    payouts = []
-    for event in ledger:
-        if event.get("username") != target_username:
-            continue
-        if str(event.get("event_type", "")).upper() not in {EVENT_PAYMENT, "PAYOUT"}:
-            continue
-        event_date = parse_date_safe(str(event.get("timestamp", ""))[:10])
-        if session_start and event_date and event_date < session_start:
-            continue
-        payouts.append(event)
-
-    lines = [f"📊 Статистика @{target_username}"]
-    lines.append(f"🗓 Начало сессии: {session_start_str}")
-    lines.append(f"🔥 Серия: {series} дн.")
-    lines.append("")
-    lines.append("📋 Одобренные задания за текущую сессию:")
-
-    if approved_doings:
-        total_sum = 0.0
-        for item in approved_doings:
-            reward = parse_float_safe(item.get("reward_value", 0))
-            total_sum += reward
-            lines.append(
-                f"  • {item.get('date', '')} — {item.get('title', '—')} — +{reward:.1f} р."
-            )
-        lines.append(
-            f"  ▶ Итого: {len(approved_doings)} заданий, {total_sum:.1f} р."
+def build_stats_text(project_id, username):
+    ensure_user(username)
+    user = users.get(username, {})
+    current_series = get_active_series(project_id, username)
+    series_text = "Нет активной серии"
+    if current_series:
+        series_text = (
+            f"{current_series.get('status', '—')} с {current_series.get('start_date', '—')}"
         )
-    else:
-        lines.append("  Нет одобренных заданий в этой сессии")
 
+    approved = []
+    pending = []
+    rejected = []
+    for doing in doings.values():
+        if doing.get("project") != project_id or doing.get("executor") != username:
+            continue
+        if doing.get("status") == DOING_STATUS_APPROVED:
+            approved.append(doing)
+        elif doing.get("status") == DOING_STATUS_SUBMITTED:
+            pending.append(doing)
+        elif doing.get("status") == DOING_STATUS_REJECTED:
+            rejected.append(doing)
+
+    approved.sort(key=lambda x: (x.get("status_date", ""), x.get("id", "")))
+    pending.sort(key=lambda x: (x.get("date_create", ""), x.get("id", "")))
+    rejected.sort(key=lambda x: (x.get("status_date", ""), x.get("id", "")))
+
+    project_events = [item for item in ledger if item.get("project") == project_id and item.get("username") == username]
+    payouts = [item for item in project_events if str(item.get("event_type", "")).upper() == EVENT_PAYMENT]
+    balance = sum(parse_float_safe(item.get("amount", 0)) for item in project_events)
+
+    lines = [f"📊 Статистика @{username} / {get_project_name(project_id)}"]
+    lines.append(f"🔁 Серия: {series_text}")
+    lines.append(f"💼 Баланс проекта: {balance:.1f} р.")
+    lines.append(f"📐 Банк математики: {user.get('bank_counter', 0)}")
     lines.append("")
-    lines.append("💸 Выплаты за текущую сессию:")
+
+    lines.append("✅ Одобренные задания:")
+    if approved:
+        for item in approved:
+            lines.append(f"  • {item.get('status_date', '')} — {item.get('title', '—')} — +{parse_float_safe(item.get('reward_value', 0)):.1f} р.")
+    else:
+        lines.append("  Нет")
+    lines.append("")
+
+    lines.append("🕓 Выполненные ещё неодобренные задания:")
+    if pending:
+        for item in pending:
+            lines.append(f"  • {item.get('date_create', '')} — {item.get('title', '—')} — +{parse_float_safe(item.get('reward_value', 0)):.1f} р.")
+    else:
+        lines.append("  Нет")
+    lines.append("")
+
+    lines.append("❌ Выполненные отклонённые задания:")
+    if rejected:
+        for item in rejected:
+            lines.append(f"  • {item.get('status_date', '')} — {item.get('title', '—')} — +{parse_float_safe(item.get('reward_value', 0)):.1f} р.")
+    else:
+        lines.append("  Нет")
+    lines.append("")
+
+    lines.append("💸 Выплаты:")
     if payouts:
-        total_paid = 0.0
-        for event in payouts:
-            amount = abs(parse_float_safe(event.get("amount", 0)))
-            total_paid += amount
-            lines.append(
-                f"  • {str(event.get('timestamp', ''))[:10]} — {amount:.1f} р."
-            )
-        lines.append(f"  ▶ Итого: {len(payouts)} выплат, {total_paid:.1f} р.")
+        for item in payouts:
+            lines.append(f"  • {str(item.get('timestamp', ''))[:10]} — {parse_float_safe(item.get('amount', 0)):.1f} р.")
     else:
-        lines.append("  Нет выплат в этой сессии")
+        lines.append("  Нет")
 
-    lines.append("")
-    lines.append(f"💼 Остаток: {balance:.1f} р.")
-    lines.append(f"📐 Банк математики: {bank_counter}")
     return "\n".join(lines)
 
 
-def get_known_usernames():
-    usernames = set(users.keys())
-    usernames.update(doing.get("executor") for doing in doings.values() if doing.get("executor"))
-    usernames.update(event.get("username") for event in ledger if event.get("username"))
-    return sorted(user for user in usernames if user)
-
-
-# ================= KEYBOARDS =================
+# ================= UI HELPERS =================
 def role_selection_keyboard():
     return InlineKeyboardMarkup(
         [
@@ -761,6 +996,19 @@ def role_selection_keyboard():
             [InlineKeyboardButton("Пользователь", callback_data="role_user")],
         ]
     )
+
+
+def project_selection_keyboard(project_list, role):
+    buttons = []
+    for project in project_list:
+        buttons.append([
+            InlineKeyboardButton(
+                project.get("name", project.get("id", "Проект")),
+                callback_data=f"project_pick_{role}_{project['id']}",
+            )
+        ])
+    buttons.append([InlineKeyboardButton("← К выбору роли", callback_data="restart_role")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def user_menu_keyboard():
@@ -784,19 +1032,18 @@ def admin_menu_keyboard():
             [InlineKeyboardButton("Оплатить", callback_data="admin_pay")],
             [InlineKeyboardButton("Добавить задание", callback_data="admin_add_task")],
             [InlineKeyboardButton("Удалить задание", callback_data="admin_delete_task")],
-            [InlineKeyboardButton("Прервать сессию", callback_data="admin_end_session")],
+            [InlineKeyboardButton("Прервать серию", callback_data="admin_end_series")],
+            [InlineKeyboardButton("Новый проект", callback_data="admin_new_project")],
+            [InlineKeyboardButton("Редактировать текущий проект", callback_data="admin_edit_project")],
             [InlineKeyboardButton("В главное меню", callback_data="main_menu")],
         ]
     )
 
 
-def back_to_main_menu_keyboard():
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("В главное меню", callback_data="main_menu")]]
-    )
+def back_main_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("В главное меню", callback_data="main_menu")]])
 
 
-# ================= VIEWS =================
 async def send_or_edit(update: Update, text: str, reply_markup=None):
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -804,334 +1051,348 @@ async def send_or_edit(update: Update, text: str, reply_markup=None):
         await update.message.reply_text(text, reply_markup=reply_markup)
 
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
-    ensure_user(username)
-    role = users.get(username, {}).get("role", ROLE_USER)
+async def send_restart_screen(update: Update):
+    separator = "\n".join([
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🔄 Перезапуск диалога",
+        "Выбери роль заново",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ])
+    if update.callback_query:
+        await update.callback_query.message.reply_text(separator, reply_markup=MAIN_MENU_REPLY_KB)
+    else:
+        await update.message.reply_text(separator, reply_markup=MAIN_MENU_REPLY_KB)
 
+
+# ================= VIEWS =================
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    role = get_current_role(context)
+    project_id = get_current_project_id(context)
+    if not role or not project_id:
+        await send_or_edit(update, "Сначала выбери роль и проект.", reply_markup=back_main_keyboard())
+        return
+
+    project_name = get_project_name(project_id)
     if role == ROLE_ADMIN:
-        text = "Меню Администратора:"
+        text = f"Меню Администратора\nПроект: {project_name}"
         markup = admin_menu_keyboard()
     else:
-        text = "Меню Пользователя:"
+        text = f"Меню Пользователя\nПроект: {project_name}"
         markup = user_menu_keyboard()
-
     await send_or_edit(update, text, reply_markup=markup)
 
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Правила:\n"
-        "1. Выполняй задания и отправляй их на проверку.\n"
-        "2. За задания с баллами вводи неотрицательные значения.\n"
-        "3. Серия обновляется после одобрения задания администратором.\n"
-        "4. Бонусы серии: 5 дней = +10 р., 9 дней = +25 р.\n"
-        "5. Банк математики: каждые 3 одобренных задания уровня 4 = +15 р.\n"
-        "6. Re/start всегда запускает повторный выбор роли."
-    )
-    await send_or_edit(update, text, reply_markup=back_to_main_menu_keyboard())
+    await send_or_edit(update, HELP_TEXT, reply_markup=back_main_keyboard())
 
 
-# ================= START / ROLE =================
+# ================= START FLOW =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
+    username = normalize_username(update.effective_user.username)
     if not username:
         await update.message.reply_text("У тебя не задан username в Telegram.")
         return
 
     ensure_user(username)
-    clear_state(username, context)
+    clear_temp_flow(username, context)
+    await send_restart_screen(update)
     user_states[username] = STATE_ROLE_SELECT
+    if update.callback_query:
+        await update.callback_query.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
+    else:
+        await update.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
 
-    await update.message.reply_text(
-        "Используй кнопку ниже для быстрого возврата в меню:",
-        reply_markup=MAIN_MENU_REPLY_KB,
-    )
-    await update.message.reply_text(
-        "Выбери роль:",
-        reply_markup=role_selection_keyboard(),
+
+async def show_role_projects(update: Update, context: ContextTypes.DEFAULT_TYPE, role: str):
+    username = normalize_username(update.effective_user.username)
+    candidates = get_accessible_projects(username, role)
+    set_ctx(context, "selected_role", role)
+
+    if not candidates:
+        await send_or_edit(update, "Нет доступных проектов для этой роли.", reply_markup=back_main_keyboard())
+        return
+
+    set_ctx(context, "project_candidates", [item["id"] for item in candidates])
+    user_states[username] = STATE_PROJECT_SELECT
+    role_name = "Администратор" if role == ROLE_ADMIN else "Пользователь"
+    await send_or_edit(
+        update,
+        f"Роль: {role_name}\nВыбери проект:",
+        reply_markup=project_selection_keyboard(candidates, role),
     )
 
 
 # ================= USER FLOWS =================
-def get_available_tasks_by_level():
+def get_available_tasks_by_level(project_id):
     grouped = defaultdict(list)
     for task in tasks.values():
-        if task.get("status") == STATUS_AVAILABLE:
-            grouped[task.get("level", "")].append(task)
+        if task.get("project") != project_id:
+            continue
+        if task.get("status") != STATUS_AVAILABLE:
+            continue
+        grouped[task.get("level", "")].append(task)
     for level in grouped:
-        grouped[level].sort(key=lambda item: (item.get("title", ""), item.get("id", "")))
+        grouped[level].sort(key=lambda item: int(item.get("id", 0)))
     return grouped
 
 
 async def show_user_levels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    grouped = get_available_tasks_by_level()
-    levels = [level for level in ["1", "1+", "1++", "2", "3", "4"] if grouped.get(level)]
+    project_id = get_current_project_id(context)
+    grouped = get_available_tasks_by_level(project_id)
+    levels = [level for level in ["1", "1+", "1++", "2", "3", "4", "USER"] if grouped.get(level)]
 
     if not levels:
-        await send_or_edit(
-            update,
-            "Нет доступных заданий.",
-            reply_markup=back_to_main_menu_keyboard(),
-        )
+        await send_or_edit(update, "Нет доступных заданий.", reply_markup=back_main_keyboard())
         return
 
     keyboard = [[InlineKeyboardButton(f"Уровень {level}", callback_data=f"tasks_level_{level}")] for level in levels]
     keyboard.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
-    await send_or_edit(
-        update,
-        "Выбери уровень:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await send_or_edit(update, "Выбери уровень:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def show_tasks_for_level(update: Update, context: ContextTypes.DEFAULT_TYPE, level: str):
-    grouped = get_available_tasks_by_level()
+    project_id = get_current_project_id(context)
+    grouped = get_available_tasks_by_level(project_id)
     level_tasks = grouped.get(level, [])
     if not level_tasks:
-        await send_or_edit(
-            update,
-            f"Для уровня {level} нет доступных заданий.",
-            reply_markup=back_to_main_menu_keyboard(),
-        )
+        await send_or_edit(update, f"Для уровня {level} нет доступных заданий.", reply_markup=back_main_keyboard())
         return
 
     buttons = []
     for task in level_tasks:
-        reward_type = task.get("reward_type")
         reward_value = parse_float_safe(task.get("reward_value", 0))
-        if level == "4":
-            label = f"{task['title']} — 15/40 р."
-        elif reward_type == REWARD_COEF:
-            label = f"{task['title']} — коэф. {reward_value}"
+        if task.get("level") == "4":
+            reward_label = "15/40 р."
+        elif task.get("reward_type") == REWARD_COEF:
+            reward_label = f"коэф. {reward_value}"
         else:
-            label = f"{task['title']} — {reward_value:.1f} р."
-        buttons.append([InlineKeyboardButton(label, callback_data=f"task_select_{task['id']}")])
+            reward_label = f"{reward_value:.1f} р."
+        buttons.append([InlineKeyboardButton(f"{task['id']}. {task['title']} — {reward_label}", callback_data=f"task_select_{task['id']}")])
 
     buttons.append([InlineKeyboardButton("← Назад", callback_data="user_tasks")])
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
-    await send_or_edit(
-        update,
-        f"Задания уровня {level}:",
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
+    await send_or_edit(update, f"Задания уровня {level}:", reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def handle_task_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: str):
-    username = update.effective_user.username
-    task = tasks.get(task_id)
+    username = normalize_username(update.effective_user.username)
+    project_id = get_current_project_id(context)
+    key = task_key(project_id, task_id)
+    task = tasks.get(key)
     if not task or task.get("status") != STATUS_AVAILABLE:
         await update.callback_query.answer("Задание недоступно")
         return
 
-    level = task.get("level")
-    if level in {"2", "3", "4"}:
-        clear_state(username, context)
+    if task.get("level") in {"2", "3", "4"}:
         user_states[username] = STATE_INPUT_SCORE
-        context.user_data["selected_task_id"] = task_id
-        await update.callback_query.message.reply_text(
-            f"Введи баллы для задания «{task.get('title', '')}»:"
-        )
+        set_ctx(context, "selected_task_id", task_id)
+        await update.callback_query.message.reply_text(f"Введи баллы для задания «{task.get('title', '')}»:")
         return
 
-    doing = create_doing_from_task(task_id, username)
-    clear_state(username, context)
-    await update.callback_query.message.reply_text(
-        f"Задание отправлено на проверку: {doing['title']} — {doing['reward_value']:.1f} р."
-    )
+    doing = create_doing_from_task(project_id, task_id, username)
+    risk = detect_series_risk(project_id, username)
+    text = f"Задание отправлено на проверку: {doing['title']} — {doing['reward_value']:.1f} р."
+    if risk:
+        text += "\n\n⚠️ У тебя Серия под угрозой срыва, обратись к Администратору."
+    await update.callback_query.message.reply_text(text)
 
 
 async def show_user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
-    text = build_stats_text(username)
-    await send_or_edit(update, text[:4096], reply_markup=back_to_main_menu_keyboard())
+    username = normalize_username(update.effective_user.username)
+    project_id = get_current_project_id(context)
+    text = build_stats_text(project_id, username)
+    await send_or_edit(update, text[:4096], reply_markup=back_main_keyboard())
 
 
 # ================= ADMIN FLOWS =================
 async def show_admin_pending_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pending_doings = [item for item in doings.values() if item.get("status") == STATUS_SUBMITTED]
-    if not pending_doings:
-        await send_or_edit(
-            update,
-            "Нет непроверенных заданий.",
-            reply_markup=admin_menu_keyboard(),
-        )
+    project_id = get_current_project_id(context)
+    pending = [item for item in doings.values() if item.get("project") == project_id and item.get("status") == DOING_STATUS_SUBMITTED]
+    if not pending:
+        await send_or_edit(update, "Нет непроверенных заданий.", reply_markup=admin_menu_keyboard())
         return
 
-    executors = sorted({item.get("executor") for item in pending_doings if item.get("executor")})
-    text_lines = ["Выбери пользователя для проверки:"]
+    executors = sorted({item.get("executor") for item in pending if item.get("executor")})
+    lines = ["Выбери пользователя для проверки:"]
     buttons = []
     for executor in executors:
-        count = sum(1 for item in pending_doings if item.get("executor") == executor)
-        text_lines.append(f"@{executor}: {count} шт.")
+        count = sum(1 for item in pending if item.get("executor") == executor)
+        lines.append(f"@{executor}: {count} шт.")
         buttons.append([InlineKeyboardButton(f"@{executor}", callback_data=f"admin_pending_user_{executor}")])
-
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
-    await send_or_edit(
-        update,
-        "\n".join(text_lines),
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
+    await send_or_edit(update, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def show_admin_pending_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
+    project_id = get_current_project_id(context)
     target_doings = [
         item for item in doings.values()
-        if item.get("executor") == target and item.get("status") == STATUS_SUBMITTED
+        if item.get("project") == project_id and item.get("executor") == target and item.get("status") == DOING_STATUS_SUBMITTED
     ]
     if not target_doings:
-        await send_or_edit(
-            update,
-            f"У @{target} нет непроверенных заданий.",
-            reply_markup=admin_menu_keyboard(),
-        )
+        await send_or_edit(update, f"У @{target} нет непроверенных заданий.", reply_markup=admin_menu_keyboard())
         return
 
-    target_doings.sort(key=lambda item: (item.get("date", ""), item.get("id", "")))
+    target_doings.sort(key=lambda item: int(item.get("id", 0)))
     lines = [f"@{target} — непроверенные задания:", ""]
     buttons = []
     for index, item in enumerate(target_doings, start=1):
-        reward = parse_float_safe(item.get("reward_value", 0))
-        lines.append(
-            f"{index}. {item.get('date', '')} / {item.get('title', '—')} — {reward:.1f} р."
-        )
-        buttons.append([
-            InlineKeyboardButton(str(index), callback_data=f"admin_doing_action_{item['id']}")
-        ])
+        lines.append(f"{index}. {item.get('date_create', '')} / {item.get('title', '—')} — {parse_float_safe(item.get('reward_value', 0)):.1f} р.")
+        buttons.append([InlineKeyboardButton(str(index), callback_data=f"admin_doing_action_{item['id']}")])
 
     buttons.append([InlineKeyboardButton("← Назад", callback_data="admin_pending")])
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
-    await send_or_edit(
-        update,
-        "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
+    await send_or_edit(update, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def show_admin_doing_action(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
-    doing = doings.get(doing_id)
+    project_id = get_current_project_id(context)
+    key = doing_key(project_id, doing_id)
+    doing = doings.get(key)
     if not doing:
         await update.callback_query.answer("Выполнение не найдено")
         return
 
-    reward = parse_float_safe(doing.get("reward_value", 0))
+    target = doing.get("executor")
+    risk = detect_series_risk(project_id, target)
+    warning = ""
+    extra_buttons = []
+    if risk:
+        warning = "\n\n⚠️ Пользователь пропустил день! Решай этот вопрос или прерывай Серию."
+        extra_buttons.append([
+            InlineKeyboardButton("Отработано", callback_data=f"series_fix_{doing_id}"),
+            InlineKeyboardButton("Напомнить завтра", callback_data=f"series_remind_{doing_id}"),
+        ])
+
     text = (
         f"Задание: {doing.get('title', '—')}\n"
         f"Исполнитель: @{doing.get('executor', '?')}\n"
-        f"Дата: {doing.get('date', '')}\n"
-        f"Стоимость: {reward:.1f} р.\n\n"
-        "Принять или отклонить?"
+        f"Дата: {doing.get('date_create', '')}\n"
+        f"Стоимость: {parse_float_safe(doing.get('reward_value', 0)):.1f} р.\n\n"
+        f"Принять или отклонить?{warning}"
     )
     buttons = [
         [
             InlineKeyboardButton("✅ Принять", callback_data=f"admin_approve_doing_{doing_id}"),
             InlineKeyboardButton("❌ Отклонить", callback_data=f"admin_reject_doing_{doing_id}"),
         ],
-        [
-            InlineKeyboardButton(
-                "← Назад",
-                callback_data=f"admin_pending_user_{doing.get('executor', '')}",
-            ),
-            InlineKeyboardButton("В главное меню", callback_data="main_menu"),
-        ],
     ]
+    buttons.extend(extra_buttons)
+    buttons.append([
+        InlineKeyboardButton("← Назад", callback_data=f"admin_pending_user_{doing.get('executor', '')}"),
+        InlineKeyboardButton("В главное меню", callback_data="main_menu"),
+    ])
     await send_or_edit(update, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def approve_doing(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
-    doing = doings.get(doing_id)
-    if not doing:
-        await update.callback_query.answer("Выполнение не найдено")
+    project_id = get_current_project_id(context)
+    admin_username = normalize_username(update.effective_user.username)
+    key = doing_key(project_id, doing_id)
+    doing = doings.get(key)
+    if not doing or doing.get("status") != DOING_STATUS_SUBMITTED:
+        await update.callback_query.answer("Это выполнение уже обработано или не найдено")
         return
-    if doing.get("status") != STATUS_SUBMITTED:
-        await update.callback_query.answer("Это выполнение уже обработано")
-        return
-
-    doing["status"] = STATUS_APPROVED
-    save_doing(doing_id)
 
     username = doing.get("executor")
+    doing["status"] = DOING_STATUS_APPROVED
+    doing["status_date"] = str(today())
+    doing["admin"] = admin_username
+    save_doing(key)
+
     reward = parse_float_safe(doing.get("reward_value", 0))
-    log_event(username, EVENT_TASK_REWARD, reward, f"Одобрено: {doing.get('title', '')}")
-    update_series_on_approved_doing(username)
-    apply_math_bank_if_needed(username, doing)
+    log_event(project_id, username, EVENT_TASK_REWARD, reward, f"Одобрено: {doing.get('title', '')}")
+    create_series_if_needed(project_id, username)
+    update_series_after_approval(project_id, username)
+    apply_math_bank_if_needed(project_id, username, doing)
+
+    ensure_user(username)
+    users[username]["last_date"] = today()
+    save_user(username)
 
     await update.callback_query.answer("Задание одобрено")
     await show_admin_pending_users(update, context)
 
 
 async def reject_doing(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
-    doing = doings.get(doing_id)
-    if not doing:
-        await update.callback_query.answer("Выполнение не найдено")
-        return
-    if doing.get("status") != STATUS_SUBMITTED:
-        await update.callback_query.answer("Это выполнение уже обработано")
+    project_id = get_current_project_id(context)
+    admin_username = normalize_username(update.effective_user.username)
+    key = doing_key(project_id, doing_id)
+    doing = doings.get(key)
+    if not doing or doing.get("status") != DOING_STATUS_SUBMITTED:
+        await update.callback_query.answer("Это выполнение уже обработано или не найдено")
         return
 
-    doing["status"] = STATUS_REJECTED
-    save_doing(doing_id)
+    doing["status"] = DOING_STATUS_REJECTED
+    doing["status_date"] = str(today())
+    doing["admin"] = admin_username
+    save_doing(key)
     await update.callback_query.answer("Задание отклонено")
     await show_admin_pending_users(update, context)
 
 
+async def mark_series_fixed(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
+    project_id = get_current_project_id(context)
+    key = doing_key(project_id, doing_id)
+    doing = doings.get(key)
+    if not doing:
+        await update.callback_query.answer("Выполнение не найдено")
+        return
+    record = get_active_series(project_id, doing.get("executor"))
+    if record:
+        record["status"] = SERIES_STATUS_ACTIVE
+        record["broken"] = False
+        save_series(record)
+    await update.callback_query.answer("Серия переведена обратно в ACTIVE")
+    await show_admin_doing_action(update, context, doing_id)
+
+
+async def remind_series_tomorrow(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
+    await update.callback_query.answer("Напоминание оставлено")
+    await show_admin_doing_action(update, context, doing_id)
+
+
 async def show_admin_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    offers = [task for task in tasks.values() if task.get("status") == STATUS_OFFERED]
+    project_id = get_current_project_id(context)
+    offers = [task for task in tasks.values() if task.get("project") == project_id and task.get("status") == STATUS_OFFERED]
     if not offers:
-        await send_or_edit(
-            update,
-            "Нет предложенных заданий.",
-            reply_markup=admin_menu_keyboard(),
-        )
+        await send_or_edit(update, "Нет предложенных заданий.", reply_markup=admin_menu_keyboard())
         return
 
-    offers.sort(key=lambda item: (item.get("date", ""), item.get("id", "")))
+    offers.sort(key=lambda item: int(item.get("id", 0)))
     lines = ["Предложенные задания:"]
     buttons = []
     for item in offers:
-        reward = parse_float_safe(item.get("reward_value", 0))
-        lines.append(f"{item['id']}. {item.get('title', '—')} — {reward:.1f} р.")
+        lines.append(f"{item['id']}. {item.get('title', '—')} — {parse_float_safe(item.get('reward_value', 0)):.1f} р.")
         buttons.append([
-            InlineKeyboardButton(
-                f"Одобрить {item['id']}",
-                callback_data=f"admin_approve_offer_{item['id']}",
-            ),
-            InlineKeyboardButton(
-                f"Отклонить {item['id']}",
-                callback_data=f"admin_reject_offer_{item['id']}",
-            ),
+            InlineKeyboardButton(f"Одобрить {item['id']}", callback_data=f"admin_approve_offer_{item['id']}"),
+            InlineKeyboardButton(f"Отклонить {item['id']}", callback_data=f"admin_reject_offer_{item['id']}"),
         ])
-
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
     await send_or_edit(update, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def show_admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    known_users = [user for user in get_known_usernames() if user]
-    if not known_users:
-        await send_or_edit(
-            update,
-            "Нет пользователей для просмотра статистики.",
-            reply_markup=admin_menu_keyboard(),
-        )
+    project_id = get_current_project_id(context)
+    usernames = sorted({doing.get("executor") for doing in doings.values() if doing.get("project") == project_id and doing.get("executor")})
+    usernames.extend([item for item in get_project_users(project_id) if item not in usernames])
+    if not usernames:
+        await send_or_edit(update, "Нет пользователей для просмотра статистики.", reply_markup=admin_menu_keyboard())
         return
 
-    buttons = [[InlineKeyboardButton(f"@{user}", callback_data=f"admin_stats_user_{user}")] for user in known_users]
+    buttons = [[InlineKeyboardButton(f"@{user}", callback_data=f"admin_stats_user_{user}")] for user in usernames]
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
     await send_or_edit(update, "Выбери пользователя:", reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def show_admin_delete_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    available_tasks = [task for task in tasks.values() if task.get("status") == STATUS_AVAILABLE]
+    project_id = get_current_project_id(context)
+    available_tasks = [task for task in tasks.values() if task.get("project") == project_id and task.get("status") == STATUS_AVAILABLE]
     if not available_tasks:
-        await send_or_edit(
-            update,
-            "Нет доступных заданий для удаления.",
-            reply_markup=admin_menu_keyboard(),
-        )
+        await send_or_edit(update, "Нет доступных заданий для удаления.", reply_markup=admin_menu_keyboard())
         return
 
-    available_tasks.sort(key=lambda item: (item.get("level", ""), item.get("title", ""), item.get("id", "")))
+    available_tasks.sort(key=lambda item: int(item.get("id", 0)))
     lines = ["Выбери задание для архивации:"]
     buttons = []
     for item in available_tasks:
@@ -1143,49 +1404,70 @@ async def show_admin_delete_tasks(update: Update, context: ContextTypes.DEFAULT_
         else:
             reward_text = f"{reward:.1f} р."
         lines.append(f"{item['id']}. [{item.get('level', '')}] {item.get('title', '—')} — {reward_text}")
-        buttons.append([
-            InlineKeyboardButton(
-                f"Удалить {item['id']}",
-                callback_data=f"admin_archive_task_{item['id']}",
-            )
-        ])
-
+        buttons.append([InlineKeyboardButton(f"Удалить {item['id']}", callback_data=f"admin_archive_task_{item['id']}")])
     buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
     await send_or_edit(update, "\n".join(lines), reply_markup=InlineKeyboardMarkup(buttons))
 
 
+async def show_project_edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    project_id = get_current_project_id(context)
+    project = projects.get(project_id)
+    if not project:
+        await send_or_edit(update, "Проект не найден.", reply_markup=admin_menu_keyboard())
+        return
+
+    text = (
+        f"Редактирование проекта: {project.get('name', project_id)}\n"
+        f"Админы: {project.get('admin', '') or '—'}\n"
+        f"Юзеры: {project.get('user', '') or '—'}\n\n"
+        f"Выбери действие:"
+    )
+    buttons = [
+        [InlineKeyboardButton("Изм. имя", callback_data="edit_project_name")],
+        [InlineKeyboardButton("Изм. админов", callback_data="edit_project_admins")],
+        [InlineKeyboardButton("Изм. юзеров", callback_data="edit_project_users")],
+        [InlineKeyboardButton("В главное меню", callback_data="main_menu")],
+    ]
+    await send_or_edit(update, text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
 # ================= TEXT HANDLER =================
 async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
+    username = normalize_username(update.effective_user.username)
     text = (update.message.text or "").strip()
     ensure_user(username)
 
     if text == "🏠 Главное меню":
-        clear_state(username, context)
         await show_main_menu(update, context)
         return
 
     if text == "Re/start":
-        clear_state(username, context)
+        clear_temp_flow(username, context)
         await start(update, context)
         return
 
     state = user_states.get(username)
 
-    if state == STATE_ADMIN_PASSWORD:
-        if text == ADMIN_PASSWORD:
-            set_user_role(username, ROLE_ADMIN)
-            clear_state(username, context)
-            await update.message.reply_text("Роль Администратор активирована.")
-            await show_main_menu(update, context)
-        else:
-            await update.message.reply_text(
-                "Неверный пароль. Введи пароль ещё раз или нажми Re/start."
-            )
+    if state == STATE_PROJECT_PASSWORD:
+        project_id = get_ctx(context, "selected_project_id")
+        role = get_ctx(context, "selected_role")
+        project = projects.get(project_id)
+        if not project:
+            await update.message.reply_text("Проект не найден. Нажми Re/start.")
+            return
+        if str(text) != str(project.get("pass", "")):
+            await update.message.reply_text("Неверный пароль проекта. Попробуй ещё раз или нажми Re/start.")
+            return
+        users[username]["role"] = role
+        save_user(username)
+        user_states.pop(username, None)
+        set_current_role_project(context, role, project_id)
+        await update.message.reply_text(f"Вход выполнен. Проект: {project.get('name', project_id)}")
+        await show_main_menu(update, context)
         return
 
     if state == STATE_OFFER_TITLE:
-        context.user_data["offer_title"] = text
+        set_ctx(context, "offer_title", text)
         user_states[username] = STATE_OFFER_REWARD
         await update.message.reply_text("Укажи награду за задание в рублях:")
         return
@@ -1195,12 +1477,14 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if reward is None or reward < 0:
             await update.message.reply_text("Введите корректное неотрицательное число.")
             return
-
-        task_id = next_task_id()
-        tasks[task_id] = {
+        project_id = get_current_project_id(context)
+        task_id = next_task_id(project_id)
+        key = task_key(project_id, task_id)
+        tasks[key] = {
+            "project": project_id,
             "id": task_id,
             "level": "USER",
-            "title": context.user_data.get("offer_title", "Без названия"),
+            "title": get_ctx(context, "offer_title", "Без названия"),
             "description": "",
             "source": SOURCE_USER,
             "reward_type": REWARD_FIXED,
@@ -1209,13 +1493,14 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             "author": username,
             "date": str(today()),
         }
-        save_task(task_id)
-        clear_state(username, context)
-        await update.message.reply_text("Предложение задания отправлено администратору.")
+        save_task(key)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_USER, project_id)
+        await update.message.reply_text("Предложение задания отправлено администраторам проекта.")
         return
 
     if state == STATE_INPUT_SCORE:
-        task_id = context.user_data.get("selected_task_id")
+        task_id = get_ctx(context, "selected_task_id")
         score = parse_float_safe(text, default=None)
         if score is None:
             await update.message.reply_text("Введите число.")
@@ -1223,20 +1508,23 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if score < 0:
             await update.message.reply_text("Баллы не могут быть отрицательными.")
             return
+        project_id = get_current_project_id(context)
         try:
-            doing = create_doing_from_task(task_id, username, score=score)
+            doing = create_doing_from_task(project_id, task_id, username, score=score)
         except ValueError as exc:
             await update.message.reply_text(str(exc))
             return
-
-        clear_state(username, context)
-        await update.message.reply_text(
-            f"Задание отправлено на проверку: {doing['title']} — {doing['reward_value']:.1f} р."
-        )
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_USER, project_id)
+        risk = detect_series_risk(project_id, username)
+        result = f"Задание отправлено на проверку: {doing['title']} — {doing['reward_value']:.1f} р."
+        if risk:
+            result += "\n\n⚠️ У тебя Серия под угрозой срыва, обратись к Администратору."
+        await update.message.reply_text(result)
         return
 
     if state == STATE_ADMIN_ADD_TITLE:
-        context.user_data["admin_task_title"] = text
+        set_ctx(context, "admin_task_title", text)
         user_states[username] = STATE_ADMIN_ADD_REWARD
         await update.message.reply_text("Укажи награду в рублях:")
         return
@@ -1246,12 +1534,14 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         if reward is None or reward < 0:
             await update.message.reply_text("Введите корректное неотрицательное число.")
             return
-
-        task_id = next_task_id()
-        tasks[task_id] = {
+        project_id = get_current_project_id(context)
+        task_id = next_task_id(project_id)
+        key = task_key(project_id, task_id)
+        tasks[key] = {
+            "project": project_id,
             "id": task_id,
             "level": "USER",
-            "title": context.user_data.get("admin_task_title", "Без названия"),
+            "title": get_ctx(context, "admin_task_title", "Без названия"),
             "description": "",
             "source": SOURCE_SYSTEM,
             "reward_type": REWARD_FIXED,
@@ -1260,75 +1550,143 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             "author": username,
             "date": str(today()),
         }
-        save_task(task_id)
-        clear_state(username, context)
+        save_task(key)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
         await update.message.reply_text("Новое задание добавлено.")
         return
 
-    if state == STATE_ADMIN_PAY_USERNAME:
-        target = normalize_username(text)
-        if target not in get_known_usernames():
-            await update.message.reply_text("Пользователь не найден. Введи @username ещё раз.")
-            return
-
-        context.user_data["payment_target"] = target
-        user_states[username] = STATE_ADMIN_PAY_AMOUNT
-        await update.message.reply_text(f"Введи сумму выплаты для @{target}:")
-        return
-
     if state == STATE_ADMIN_PAY_AMOUNT:
-        target = context.user_data.get("payment_target")
         amount = parse_float_safe(text, default=None)
-        if amount is None or amount < 0:
-            await update.message.reply_text("Введите корректное неотрицательное число.")
+        if amount is None:
+            await update.message.reply_text("Введите корректное число.")
             return
-
-        log_event(target, EVENT_PAYMENT, -amount, "Выплата наличных")
-        clear_state(username, context)
-        await update.message.reply_text(f"Выплата @{target}: {amount:.1f} р. записана.")
+        target = get_ctx(context, "payment_target")
+        project_id = get_ctx(context, "payment_project")
+        log_event(project_id, target, EVENT_PAYMENT, amount, "Ручная выплата / долг")
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text(f"Запись в ledger добавлена: @{target} / {amount:.1f} р.")
         return
 
-    if state == STATE_ADMIN_END_SESSION_USERNAME:
-        target = normalize_username(text)
-        if target not in users:
-            await update.message.reply_text("Пользователь не найден в users. Введи @username ещё раз.")
-            return
-
-        target_user = users[target]
-        session_start = target_user.get("session_start")
-        last_date = target_user.get("last_date")
-        context.user_data["end_session_target"] = target
-        user_states[username] = STATE_ADMIN_END_SESSION_CONFIRM
-
-        session_start_str = session_start.strftime("%d.%m.%Y") if session_start else "—"
-        last_date_str = last_date.strftime("%d.%m.%Y") if last_date else "—"
-        await update.message.reply_text(
-            f"Подтверди завершение сессии для @{target}:\n"
-            f"Серия: {target_user.get('series', 0)}\n"
-            f"Начало сессии: {session_start_str}\n"
-            f"Последнее задание: {last_date_str}\n"
-            f"Баланс не изменится.\n\n"
-            f"Напиши ДА для подтверждения или отправь любое другое сообщение для отмены."
-        )
-        return
-
-    if state == STATE_ADMIN_END_SESSION_CONFIRM:
-        target = context.user_data.get("end_session_target")
+    if state == STATE_ADMIN_END_SERIES_CONFIRM:
         if text != "ДА":
-            clear_state(username, context)
-            await update.message.reply_text("Завершение сессии отменено.")
+            project_id = get_current_project_id(context)
+            clear_temp_flow(username, context)
+            set_current_role_project(context, ROLE_ADMIN, project_id)
+            await update.message.reply_text("Закрытие серии отменено.")
             return
+        target = get_ctx(context, "payment_target")
+        project_id = get_current_project_id(context)
+        ok, message = close_series(project_id, target, username)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text(message)
+        return
 
-        ensure_user(target)
-        users[target]["series"] = 0
-        users[target]["bank_counter"] = 0
-        users[target]["last_date"] = None
-        users[target]["session_start"] = today()
-        insurance_used[target] = False
-        save_user(target)
-        log_event(target, EVENT_SESSION_RESET, 0, "Сессия сброшена администратором")
-        clear_state(username, context)
-        await update.message.reply_text(f"Сессия пользователя @{target} успешно сброшена.")
+    if state == STATE_PROJECT_CREATE_NAME:
+        set_ctx(context, "project_create_name", text)
+        set_ctx(context, "project_create_admins", [username])
+        user_states[username] = STATE_PROJECT_CREATE_ADMINS
+        await update.message.reply_text("Вы будете назначены Администратором по умолчанию. Укажите ещё Администраторов через | (с @) или отправьте - :")
+        return
+
+    if state == STATE_PROJECT_CREATE_ADMINS:
+        admins = get_ctx(context, "project_create_admins", [username])
+        if text != "-":
+            admins.extend(split_users(text.replace(",", "|")))
+        set_ctx(context, "project_create_admins", sorted(set(admins)))
+        user_states[username] = STATE_PROJECT_CREATE_USERS
+        await update.message.reply_text("Укажите никнеймы пользователей через | (с @):")
+        return
+
+    if state == STATE_PROJECT_CREATE_USERS:
+        users_list = split_users(text.replace(",", "|"))
+        set_ctx(context, "project_create_users", users_list)
+        user_states[username] = STATE_PROJECT_CREATE_PASS
+        await update.message.reply_text("Укажите пароль проекта:")
+        return
+
+    if state == STATE_PROJECT_CREATE_PASS:
+        all_ids = [int(pid) for pid in projects if str(pid).isdigit()]
+        project_id = str(max(all_ids) + 1) if all_ids else "1"
+        projects[project_id] = {
+            "id": project_id,
+            "name": get_ctx(context, "project_create_name", "Новый проект"),
+            "pass": text,
+            "author": username,
+            "admin": join_users(get_ctx(context, "project_create_admins", [username])),
+            "user": join_users(get_ctx(context, "project_create_users", [])),
+            "date_create": str(today()),
+        }
+        save_project(project_id)
+        for item in SYSTEM_TASK_SEED:
+            task_id = next_task_id(project_id)
+            key = task_key(project_id, task_id)
+            tasks[key] = {
+                "project": project_id,
+                "id": task_id,
+                "level": item["level"],
+                "title": item["title"],
+                "description": item["description"],
+                "source": item["source"],
+                "reward_type": item["reward_type"],
+                "reward_value": item["reward_value"],
+                "status": STATUS_AVAILABLE,
+                "author": username,
+                "date": str(today()),
+            }
+            save_task(key)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text(f"Проект создан: {projects[project_id]['name']}")
+        return
+
+    if state == STATE_PROJECT_EDIT_PASSWORD:
+        project_id = get_current_project_id(context)
+        project = projects.get(project_id)
+        if not project or str(text) != str(project.get("pass", "")):
+            await update.message.reply_text("Неверный пароль проекта.")
+            return
+        action = get_ctx(context, "project_edit_action")
+        if action == "name":
+            user_states[username] = STATE_PROJECT_EDIT_NAME
+            await update.message.reply_text("Введите новое имя проекта:")
+        elif action == "admins":
+            user_states[username] = STATE_PROJECT_EDIT_ADMINS
+            await update.message.reply_text(f"Текущие админы: {project.get('admin', '') or '—'}\nВведите новый полный список админов через |:")
+        elif action == "users":
+            user_states[username] = STATE_PROJECT_EDIT_USERS
+            await update.message.reply_text(f"Текущие юзеры: {project.get('user', '') or '—'}\nВведите новый полный список юзеров через |:")
+        else:
+            await update.message.reply_text("Неизвестное действие.")
+        return
+
+    if state == STATE_PROJECT_EDIT_NAME:
+        project_id = get_current_project_id(context)
+        projects[project_id]["name"] = text
+        save_project(project_id)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text("Имя проекта обновлено.")
+        return
+
+    if state == STATE_PROJECT_EDIT_ADMINS:
+        project_id = get_current_project_id(context)
+        projects[project_id]["admin"] = join_users(split_users(text.replace(",", "|")))
+        save_project(project_id)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text("Список админов обновлён.")
+        return
+
+    if state == STATE_PROJECT_EDIT_USERS:
+        project_id = get_current_project_id(context)
+        projects[project_id]["user"] = join_users(split_users(text.replace(",", "|")))
+        save_project(project_id)
+        clear_temp_flow(username, context)
+        set_current_role_project(context, ROLE_ADMIN, project_id)
+        await update.message.reply_text("Список юзеров обновлён.")
         return
 
     await update.message.reply_text("Не понял сообщение. Используй меню или Re/start.")
@@ -1339,11 +1697,15 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     data = query.data
-    username = query.from_user.username
+    username = normalize_username(query.from_user.username)
     ensure_user(username)
 
+    if data == "restart_role":
+        clear_temp_flow(username, context)
+        await start(update, context)
+        return
+
     if data == "main_menu":
-        clear_state(username, context)
         await show_main_menu(update, context)
         return
 
@@ -1351,20 +1713,32 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_help(update, context)
         return
 
-    if data == "role_user":
-        set_user_role(username, ROLE_USER)
-        clear_state(username, context)
-        await query.message.reply_text("Роль Пользователь активирована.")
-        await show_main_menu(update, context)
+    if data == "role_admin":
+        users[username]["role"] = ROLE_ADMIN
+        save_user(username)
+        await show_role_projects(update, context, ROLE_ADMIN)
         return
 
-    if data == "role_admin":
-        if not is_admin_allowed(username):
-            await query.message.reply_text("У тебя нет доступа к роли Администратор.")
+    if data == "role_user":
+        users[username]["role"] = ROLE_USER
+        save_user(username)
+        await show_role_projects(update, context, ROLE_USER)
+        return
+
+    if data.startswith("project_pick_"):
+        _, _, role, project_id = data.split("_", 3)
+        if not user_has_project_role(username, project_id, role):
+            await query.message.reply_text("У тебя нет доступа к этому проекту для выбранной роли.")
             return
-        clear_state(username, context)
-        user_states[username] = STATE_ADMIN_PASSWORD
-        await query.message.reply_text("Введи пароль администратора:")
+        set_ctx(context, "selected_project_id", project_id)
+        set_ctx(context, "selected_role", role)
+        if role == ROLE_ADMIN:
+            user_states[username] = STATE_PROJECT_PASSWORD
+            await query.message.reply_text(f"Введи пароль проекта «{get_project_name(project_id)}»:")
+            return
+        user_states.pop(username, None)
+        set_current_role_project(context, role, project_id)
+        await show_main_menu(update, context)
         return
 
     if data == "user_tasks":
@@ -1382,7 +1756,6 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if data == "offer_job":
-        clear_state(username, context)
         user_states[username] = STATE_OFFER_TITLE
         await query.message.reply_text("Введи название предлагаемого задания:")
         return
@@ -1415,23 +1788,37 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await reject_doing(update, context, doing_id)
         return
 
+    if data.startswith("series_fix_"):
+        doing_id = data.replace("series_fix_", "", 1)
+        await mark_series_fixed(update, context, doing_id)
+        return
+
+    if data.startswith("series_remind_"):
+        doing_id = data.replace("series_remind_", "", 1)
+        await remind_series_tomorrow(update, context, doing_id)
+        return
+
     if data == "admin_offers":
         await show_admin_offers(update, context)
         return
 
     if data.startswith("admin_approve_offer_"):
+        project_id = get_current_project_id(context)
         task_id = data.replace("admin_approve_offer_", "", 1)
-        if task_id in tasks:
-            tasks[task_id]["status"] = STATUS_AVAILABLE
-            save_task(task_id)
+        key = task_key(project_id, task_id)
+        if key in tasks:
+            tasks[key]["status"] = STATUS_AVAILABLE
+            save_task(key)
         await show_admin_offers(update, context)
         return
 
     if data.startswith("admin_reject_offer_"):
+        project_id = get_current_project_id(context)
         task_id = data.replace("admin_reject_offer_", "", 1)
-        if task_id in tasks:
-            tasks[task_id]["status"] = STATUS_REJECTED
-            save_task(task_id)
+        key = task_key(project_id, task_id)
+        if key in tasks:
+            tasks[key]["status"] = STATUS_REJECTED
+            save_task(key)
         await show_admin_offers(update, context)
         return
 
@@ -1441,7 +1828,8 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if data.startswith("admin_stats_user_"):
         target = data.replace("admin_stats_user_", "", 1)
-        text = build_stats_text(target)
+        project_id = get_current_project_id(context)
+        text = build_stats_text(project_id, target)
         markup = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("← Назад", callback_data="admin_stats")],
@@ -1452,13 +1840,25 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if data == "admin_pay":
-        clear_state(username, context)
-        user_states[username] = STATE_ADMIN_PAY_USERNAME
-        await query.message.reply_text("Введи @username пользователя для выплаты:")
+        project_id = get_current_project_id(context)
+        users_list = sorted(set(get_project_users(project_id)))
+        if not users_list:
+            await query.message.reply_text("В проекте нет пользователей для выплаты.")
+            return
+        buttons = [[InlineKeyboardButton(f"@{item}", callback_data=f"admin_pay_user_{item}")] for item in users_list]
+        buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+        await send_or_edit(update, "Выбери пользователя для записи выплаты/долга:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin_pay_user_"):
+        target = data.replace("admin_pay_user_", "", 1)
+        set_ctx(context, "payment_target", target)
+        set_ctx(context, "payment_project", get_current_project_id(context))
+        user_states[username] = STATE_ADMIN_PAY_AMOUNT
+        await query.message.reply_text("Введи сумму. Как введёшь, так и запишем в ledger (знак не инвертируется):")
         return
 
     if data == "admin_add_task":
-        clear_state(username, context)
         user_states[username] = STATE_ADMIN_ADD_TITLE
         await query.message.reply_text("Введи название нового задания:")
         return
@@ -1468,17 +1868,59 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if data.startswith("admin_archive_task_"):
+        project_id = get_current_project_id(context)
         task_id = data.replace("admin_archive_task_", "", 1)
-        if task_id in tasks and tasks[task_id].get("status") == STATUS_AVAILABLE:
-            tasks[task_id]["status"] = STATUS_ARCHIVED
-            save_task(task_id)
+        key = task_key(project_id, task_id)
+        if key in tasks and tasks[key].get("status") == STATUS_AVAILABLE:
+            tasks[key]["status"] = STATUS_ARCHIVED
+            save_task(key)
         await show_admin_delete_tasks(update, context)
         return
 
-    if data == "admin_end_session":
-        clear_state(username, context)
-        user_states[username] = STATE_ADMIN_END_SESSION_USERNAME
-        await query.message.reply_text("Введи @username пользователя для завершения сессии:")
+    if data == "admin_end_series":
+        project_id = get_current_project_id(context)
+        active_series = [item for item in series_records if item.get("project") == project_id and item.get("status") in {SERIES_STATUS_ACTIVE, SERIES_STATUS_AT_RISK}]
+        if not active_series:
+            await query.message.reply_text("Нет активных серий в проекте.")
+            return
+        active_series.sort(key=lambda item: (item.get("username", ""), item.get("start_date", "")))
+        buttons = [[InlineKeyboardButton(f"@{item['username']} / {item['start_date']}", callback_data=f"admin_end_series_user_{item['username']}")] for item in active_series]
+        buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+        await send_or_edit(update, "Выбери пользователя для закрытия серии:", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin_end_series_user_"):
+        target = data.replace("admin_end_series_user_", "", 1)
+        set_ctx(context, "payment_target", target)
+        user_states[username] = STATE_ADMIN_END_SERIES_CONFIRM
+        await query.message.reply_text(f"Подтверди закрытие текущей серии для @{target}. Напиши ДА.")
+        return
+
+    if data == "admin_new_project":
+        user_states[username] = STATE_PROJECT_CREATE_NAME
+        await query.message.reply_text("Дайте имя новому проекту:")
+        return
+
+    if data == "admin_edit_project":
+        await show_project_edit_menu(update, context)
+        return
+
+    if data == "edit_project_name":
+        set_ctx(context, "project_edit_action", "name")
+        user_states[username] = STATE_PROJECT_EDIT_PASSWORD
+        await query.message.reply_text("Введите пароль текущего проекта:")
+        return
+
+    if data == "edit_project_admins":
+        set_ctx(context, "project_edit_action", "admins")
+        user_states[username] = STATE_PROJECT_EDIT_PASSWORD
+        await query.message.reply_text("Введите пароль текущего проекта:")
+        return
+
+    if data == "edit_project_users":
+        set_ctx(context, "project_edit_action", "users")
+        user_states[username] = STATE_PROJECT_EDIT_PASSWORD
+        await query.message.reply_text("Введите пароль текущего проекта:")
         return
 
 
@@ -1486,15 +1928,14 @@ async def global_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 async def post_init(application):
     asyncio.create_task(_sheets_worker())
     await application.bot.set_my_commands([
-        BotCommand("start", "Запустить / сменить роль"),
+        BotCommand("start", "Запустить / сменить роль и проект"),
     ])
-    print("[Queue] Sheets write worker started")
+    print("[Queue] Sheets worker started")
 
 
 # ================= BOOTSTRAP =================
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(global_query_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, global_text_handler))
