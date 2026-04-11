@@ -1,3 +1,10 @@
+# Что нового, версия 4.1:
+# - start(): отправка INTRO_TEXT перед 'Выбери роль:' (обе ветки: message и callback_query)
+# - show_role_projects(): при пустом списке у ADMIN — текст 'Нет доступных проектов как у Администратора.' + кнопка 'Создать проект'
+#   при пустом списке у USER — прежнее поведение без кнопки создания
+# - project_selection_keyboard(): защитная кнопка 'Создать проект' при project_list=[] и role==ROLE_ADMIN
+# - approve_doing(): project_id для log_event и бизнес-логики берётся из doing['project'], не из контекста admin-а
+
 import os
 import json
 import time
@@ -195,14 +202,14 @@ SYSTEM_TASK_SEED = [
 ]
 
 HELP_TEXT = (
-    "Каждый день выполняй минимум одно дело.\n\n"
-    "Можешь предлагать задания.\n\n"
-    "Пропуск дня сбрасывает серию.\n\n"
-    "Задания могут быть с фиксированной оплатой (и ты такие можешь предлагать), а могут быть - с коэффициентом - их Администратор заводит)\n\n"
-    "Майлстоуны: 5 дней (+10р), 9 дней (+25р).\n\n"
-    "Полная серия - 14 дней. Делай хоть что-то каждый день - иначе ВСЮ серию начинаем сначала (накопленные деньги теряешь).\n\n"
+    "Каждый день выполняй минимум одно дело.\n"
+    "Можешь предлагать задания.\n"
+    "Пропуск дня сбрасывает серию.\n"
+    "Задания: Ур.1 (1,5р), Ур.1+ (2,5р), Ур.1++ (30р), Ур.2 (коэф.0,5), Ур.3 (коэф.0,4), Ур.4 (15/40р).\n"
+    "Майлстоуны: 5 дней (+10р), 9 дней (+25р).\n"
+    "Полная серия - 14 дней. Делай хоть что-то каждый день - иначе ВСЮ серию начинаем сначала (накопленные деньги теряешь).\n"
     "Без форс-мажоров выплата в конце серии (частичные выплаты - по договоренности)"
-))
+)
 
 
 INTRO_TEXT = (
@@ -668,6 +675,7 @@ def load_data():
         tasks[key] = {
             "project": project_id,
             "id": task_id,
+            "level": str(row.get("level", "")).strip(),
             "title": row.get("title", ""),
             "description": row.get("description", ""),
             "source": row.get("source", ""),
@@ -734,16 +742,50 @@ load_data()
 
 
 # ================= BUSINESS LOGIC =================
+def ensure_system_tasks_initialized():
+    if not projects:
+        return
+    for project_id, project in projects.items():
+        has_tasks = any(task.get("project") == project_id for task in tasks.values())
+        if has_tasks:
+            continue
+        for item in SYSTEM_TASK_SEED:
+            task_id = next_task_id(project_id)
+            key = task_key(project_id, task_id)
+            tasks[key] = {
+                "project": project_id,
+                "id": task_id,
+                "level": item["level"],
+                "title": item["title"],
+                "description": item["description"],
+                "source": item["source"],
+                "reward_type": item["reward_type"],
+                "reward_value": item["reward_value"],
+                "status": STATUS_AVAILABLE,
+                "author": project.get("author", "SYSTEM"),
+                "date": str(today()),
+            }
+            save_task(key)
 
+
+ensure_system_tasks_initialized()
 
 
 def calculate_reward(task, score=None):
-    reward_type = task.get("rewardtype")
-    reward_value = parse_float_safe(task.get("rewardvalue", 0))
+    level = task.get("level")
+    reward_type = task.get("reward_type")
+    reward_value = parse_float_safe(task.get("reward_value", 0))
+
+    if level == "4":
+        if score is None:
+            raise ValueError("Для уровня 4 требуется score")
+        return 15.0 if score <= 20 else 40.0
+
     if reward_type == REWARD_COEF:
         if score is None:
-            raise ValueError("Введите значение для задачи с коэффициентом.")
+            raise ValueError("Для задания с коэффициентом требуется score")
         return float(score) * reward_value
+
     return reward_value
 
 
@@ -877,6 +919,18 @@ def close_series(project_id, username, closed_by):
     return True, "Серия закрыта."
 
 
+def apply_math_bank_if_needed(project_id, username, doing):
+    task_id = str(doing.get("task", ""))
+    key = task_key(project_id, task_id)
+    task = tasks.get(key)
+    if not task or task.get("level") != "4":
+        return
+
+    user = ensure_user(username)
+    user["bank_counter"] = user.get("bank_counter", 0) + 1
+    if user["bank_counter"] % 3 == 0:
+        log_event(project_id, username, EVENT_MATH_BANK, 15, f"Банк математики: {user['bank_counter']} выполнений уровня 4")
+    save_user(username)
 
 
 def build_stats_text(project_id, username):
@@ -969,6 +1023,9 @@ def project_selection_keyboard(project_list, role):
                 callback_data=f"project_pick_{role}_{project['id']}",
             )
         ])
+    # Защитная кнопка: если проектов нет и роль — Администратор
+    if not project_list and role == ROLE_ADMIN:
+        buttons.append([InlineKeyboardButton("Создать проект", callback_data="admin_new_project")])
     buttons.append([InlineKeyboardButton("← К выбору роли", callback_data="restart_role")])
     return InlineKeyboardMarkup(buttons)
 
@@ -1060,8 +1117,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_restart_screen(update)
     user_states[username] = STATE_ROLE_SELECT
     if update.callback_query:
+        await update.callback_query.message.reply_text(INTRO_TEXT)
         await update.callback_query.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
     else:
+        await update.message.reply_text(INTRO_TEXT)
         await update.message.reply_text("Выбери роль:", reply_markup=role_selection_keyboard())
 
 
@@ -1071,7 +1130,22 @@ async def show_role_projects(update: Update, context: ContextTypes.DEFAULT_TYPE,
     set_ctx(context, "selected_role", role)
 
     if not candidates:
-        await send_or_edit(update, "Нет доступных проектов для этой роли.", reply_markup=back_main_keyboard())
+        if role == ROLE_ADMIN:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Создать проект", callback_data="admin_new_project")],
+                [InlineKeyboardButton("← К выбору роли", callback_data="restart_role")],
+            ])
+            await send_or_edit(
+                update,
+                "Нет доступных проектов как у Администратора.",
+                reply_markup=keyboard,
+            )
+        else:
+            await send_or_edit(
+                update,
+                "Нет доступных проектов для этой роли.",
+                reply_markup=back_main_keyboard(),
+            )
         return
 
     set_ctx(context, "project_candidates", [item["id"] for item in candidates])
@@ -1085,25 +1159,56 @@ async def show_role_projects(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 # ================= USER FLOWS =================
+def get_available_tasks_by_level(project_id):
+    grouped = defaultdict(list)
+    for task in tasks.values():
+        if task.get("project") != project_id:
+            continue
+        if task.get("status") != STATUS_AVAILABLE:
+            continue
+        grouped[task.get("level", "")].append(task)
+    for level in grouped:
+        grouped[level].sort(key=lambda item: int(item.get("id", 0)))
+    return grouped
 
-async def show_available_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def show_user_levels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     project_id = get_current_project_id(context)
-    available_tasks = [task for task in tasks.values() if task.get("project") == project_id and task.get("status") == STATUS_AVAILABLE]
-    if not available_tasks:
+    grouped = get_available_tasks_by_level(project_id)
+    levels = [level for level in ["1", "1+", "1++", "2", "3", "4", "USER"] if grouped.get(level)]
+
+    if not levels:
         await send_or_edit(update, "Нет доступных заданий.", reply_markup=back_main_keyboard())
         return
-    available_tasks.sort(key=lambda item: int(item.get("id", 0)))
+
+    keyboard = [[InlineKeyboardButton(f"Уровень {level}", callback_data=f"tasks_level_{level}")] for level in levels]
+    keyboard.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await send_or_edit(update, "Выбери уровень:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def show_tasks_for_level(update: Update, context: ContextTypes.DEFAULT_TYPE, level: str):
+    project_id = get_current_project_id(context)
+    grouped = get_available_tasks_by_level(project_id)
+    level_tasks = grouped.get(level, [])
+    if not level_tasks:
+        await send_or_edit(update, f"Для уровня {level} нет доступных заданий.", reply_markup=back_main_keyboard())
+        return
+
     buttons = []
-    for task in available_tasks:
-        reward_value = parse_float_safe(task.get("rewardvalue", 0))
-        if task.get("rewardtype") == REWARD_COEF:
-            reward_label = f"коэффициент {reward_value:g}"
+    for task in level_tasks:
+        reward_value = parse_float_safe(task.get("reward_value", 0))
+        if task.get("level") == "4":
+            reward_label = "15/40 р."
+        elif task.get("reward_type") == REWARD_COEF:
+            reward_label = f"коэф. {reward_value}"
         else:
-            reward_label = f"{reward_value:.2f} р."
-        label = f"{task.get('id')}. {task.get('title')} — {reward_label}"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"taskselect|{task.get('id')}")])
-    buttons.append([InlineKeyboardButton("Назад", callback_data="mainmenu")])
-    await send_or_edit(update, "Выберите задание:", reply_markup=InlineKeyboardMarkup(buttons))
+            reward_label = f"{reward_value:.1f} р."
+        buttons.append([InlineKeyboardButton(f"{task['id']}. {task['title']} — {reward_label}", callback_data=f"task_select_{task['id']}")])
+
+    buttons.append([InlineKeyboardButton("← Назад", callback_data="user_tasks")])
+    buttons.append([InlineKeyboardButton("В главное меню", callback_data="main_menu")])
+    await send_or_edit(update, f"Задания уровня {level}:", reply_markup=InlineKeyboardMarkup(buttons))
+
 
 async def handle_task_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, task_id: str):
     username = normalize_username(update.effective_user.username)
@@ -1217,14 +1322,24 @@ async def show_admin_doing_action(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def approve_doing(update: Update, context: ContextTypes.DEFAULT_TYPE, doing_id: str):
-    project_id = get_current_project_id(context)
+    admin_project_id = get_current_project_id(context)
     admin_username = normalize_username(update.effective_user.username)
-    key = doing_key(project_id, doing_id)
+    # Ищем doing по контексту admin-а; если не нашли — ищем по всем проектам
+    key = doing_key(admin_project_id, doing_id)
     doing = doings.get(key)
+    if not doing:
+        # Fallback: найти doing по doing_id среди всех проектов
+        for k, d in doings.items():
+            if d.get("id") == doing_id:
+                doing = d
+                key = k
+                break
     if not doing or doing.get("status") != DOING_STATUS_SUBMITTED:
         await update.callback_query.answer("Это выполнение уже обработано или не найдено")
         return
 
+    # Используем project_id из самого doing, чтобы не зависеть от контекста admin-а
+    project_id = doing.get("project", admin_project_id)
     username = doing.get("executor")
     doing["status"] = DOING_STATUS_APPROVED
     doing["status_date"] = str(today())
@@ -1235,6 +1350,7 @@ async def approve_doing(update: Update, context: ContextTypes.DEFAULT_TYPE, doin
     log_event(project_id, username, EVENT_TASK_REWARD, reward, f"Одобрено: {doing.get('title', '')}")
     create_series_if_needed(project_id, username)
     update_series_after_approval(project_id, username)
+    apply_math_bank_if_needed(project_id, username, doing)
 
     ensure_user(username)
     users[username]["last_date"] = today()
@@ -1403,7 +1519,7 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if state == STATE_OFFER_REWARD:
-        reward = parse_float_safe(text.replace(",", "."), default=None)
+        reward = parse_float_safe(text, default=None)
         if reward is None or reward < 0:
             await update.message.reply_text("Введите корректное неотрицательное число.")
             return
@@ -1460,7 +1576,7 @@ async def global_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if state == STATE_ADMIN_ADD_REWARD:
-        reward = parse_float_safe(text.replace(",", "."), default=None)
+        reward = parse_float_safe(text, default=None)
         if reward is None or reward < 0:
             await update.message.reply_text("Введите корректное неотрицательное число.")
             return
